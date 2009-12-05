@@ -273,6 +273,10 @@ read_chunk (struct gzelide_state *state)
    * of the data is desired.  */
   while (1)
     {
+      refresh_in_buf (state->fin, state->zs, state->in_buf);
+      state->zs->next_out = (unsigned char *) state->out_buf->str;
+      state->zs->avail_out = state->out_buf->allocated_len;
+
       unsigned char *read_start = state->zs->next_in;
 
       int status = inflate (state->zs, Z_NO_FLUSH);
@@ -294,12 +298,33 @@ read_chunk (struct gzelide_state *state)
 
       g_string_append_len (state->chunk_buf, (char *) read_start, state->zs->next_in - read_start);  
 
-      refresh_in_buf (state->fin, state->zs, state->in_buf);
-      state->zs->next_out = (unsigned char *) state->out_buf->str;
-      state->zs->avail_out = state->out_buf->allocated_len;
-
       if (status == Z_STREAM_END)
         {
+          unsigned purported_crc = next_chunk_byte (state);
+          purported_crc += ((unsigned) next_chunk_byte (state)) << 8;
+          purported_crc += ((unsigned) next_chunk_byte (state)) << 16;
+          purported_crc += ((unsigned) next_chunk_byte (state)) << 24;
+
+          unsigned purported_uncompressed_size = next_chunk_byte (state);
+          purported_uncompressed_size += ((unsigned) next_chunk_byte (state)) << 8;
+          purported_uncompressed_size += ((unsigned) next_chunk_byte (state)) << 16;
+          if (peek_byte (state->fin, state->zs, state->in_buf) == EOF)
+            {
+              fprintf (stderr, PROGRAM_NAME ": info: purported gzip chunk ends in middle of trailing crc+size bytes\n");
+              return -1;
+            }
+          purported_uncompressed_size += ((unsigned) next_chunk_byte (state)) << 24;
+#if 0
+          /* Check CRC and original size */
+          s->crc = crc32(s->crc, start, (uInt)(s->stream.next_out - start));
+          start = s->stream.next_out;
+
+          if (getLong(s) != s->crc) {
+            s->z_err = Z_DATA_ERROR;
+          } else {
+            (void)getLong(s);
+#endif
+
           /* reached the end of the chunk */
           return state->chunk_buf->len;
         }
