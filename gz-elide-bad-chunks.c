@@ -165,77 +165,72 @@ peek_byte (FILE     *fin,
 }
 
 /* returns EOF on eof */
-static int
-get_byte (FILE     *fin, 
-          z_stream *zs,
-          GString  *in_buf)
+static int 
+next_chunk_byte (struct gzelide_state *state)
 {
-  int byte = peek_byte (fin, zs, in_buf);
+  int byte = peek_byte (state->fin, state->zs, state->in_buf);
 
   if (byte != EOF)
     {
-      zs->avail_in--;
-      zs->next_in++;
+      state->zs->avail_in--;
+      state->zs->next_in++;
+      g_string_append_c (state->chunk_buf, byte);
     }
 
   return byte;
 }
 
-#if 0
-static void
-read_header (FILE     *fin, 
-             z_stream *zs,
-             GString  *in_buf,
-             GString  *out_buf)
+/* returns chunk size, or 0 on EOF, or -1 on bad gzip data */
+static int
+read_chunk (struct gzelide_state *state)
 {
-  int flags;
-  int byte;
-  int i;
+  g_string_set_size (state->chunk_buf, 0);
 
+  int i;
   for (i = 0; i < sizeof (GZ_MAGIC); i++)
-    if (get_byte (fin, zs, in_buf) != GZ_MAGIC[i])
+    if (next_chunk_byte (state) != GZ_MAGIC[i])
       {
-        fprintf (stderr, PROGRAM_NAME ": error: input doesn't start with gzip magic header\n");
-        exit (4);
+        fprintf (stderr, PROGRAM_NAME ": info: purported gzip chunk doesn't start with gzip magic header\n");
+        return -1;
       }
 
-  byte = get_byte (fin, zs, in_buf);
+  int byte = next_chunk_byte (state);
   fprintf (stderr, PROGRAM_NAME ": info: method=0x%02x\n", byte);
   if (byte != Z_DEFLATED)
     {
-      fprintf (stderr, PROGRAM_NAME ": error: method != Z_DEFLATED\n");
-      exit (5);
+      fprintf (stderr, PROGRAM_NAME ": info: purported gzip chunk has method != Z_DEFLATED\n");
+      return -1;
     }
 
-  flags = get_byte (fin, zs, in_buf);
+  int flags = next_chunk_byte (state);
   fprintf (stderr, PROGRAM_NAME ": info: flags=0x%02x\n", flags);
   if ((flags & RESERVED) != 0)
     {
-      fprintf (stderr, PROGRAM_NAME ": error: flags byte has reserved bits set\n");
-      exit (6);
+      fprintf (stderr, PROGRAM_NAME ": info: purported gzip chunk has reserved bits set\n");
+      return -1;
     }
   
   /* discard time, xflags and os code */
   for (i = 0; i < 6; i++) 
-    get_byte (fin, zs, in_buf);
+    next_chunk_byte (state);
 
   if ((flags & EXTRA_FIELD) != 0)  
     { 
       fprintf (stderr, PROGRAM_NAME ": info: flags byte indicates there is an extra field\n");
 
-      unsigned len = (unsigned) get_byte (fin, zs, in_buf);
-      len += ((unsigned) get_byte (fin, zs, in_buf)) << 8;
+      unsigned len = (unsigned) next_chunk_byte (state);
+      len += ((unsigned) next_chunk_byte (state)) << 8;
 
       /* len is garbage if EOF but the loop below will quit anyway */
-      while (len-- != 0 && get_byte (fin, zs, in_buf) != EOF);
+      while (len-- > 0 && next_chunk_byte (state) != EOF);
     }
 
   if ((flags & ORIG_NAME) != 0) 
     {
       GString *tmp_str = g_string_new ("");
-      for (byte = get_byte (fin, zs, in_buf); 
+      for (byte = next_chunk_byte (state); 
            byte != 0 && byte != EOF; 
-           byte = get_byte (fin, zs, in_buf))
+           byte = next_chunk_byte (state))
         g_string_append_c (tmp_str, byte);
       fprintf (stderr, PROGRAM_NAME ": info: original name of gzipped file: %s\n", tmp_str->str);
       g_string_free (tmp_str, TRUE);
@@ -244,29 +239,83 @@ read_header (FILE     *fin,
   if ((flags & COMMENT) != 0) 
     {
       GString *tmp_str = g_string_new ("");
-      for (byte = get_byte (fin, zs, in_buf); 
+      for (byte = next_chunk_byte (state); 
            byte != 0 && byte != EOF; 
-           byte = get_byte (fin, zs, in_buf))
+           byte = next_chunk_byte (state))
         g_string_append_c (tmp_str, byte);
       fprintf (stderr, PROGRAM_NAME ": info: gzip header comment: %s\n", tmp_str->str);
       g_string_free (tmp_str, TRUE);
     }
 
-    if ((flags & HEAD_CRC) != 0) 
-      { 
-        int head_crc[2];
-        head_crc[0] = get_byte (fin, zs, in_buf);
-        head_crc[1] = get_byte (fin, zs, in_buf);
-      }
+  if ((flags & HEAD_CRC) != 0) 
+    { 
+      int head_crc[2];
+      head_crc[0] = next_chunk_byte (state);
+      head_crc[1] = next_chunk_byte (state);
+      fprintf (stderr, PROGRAM_NAME ": info: gzip head crc: %02x%02x\n", head_crc[0], head_crc[1]);
+    }
 
-    /*
-    if (peek_byte (fin, zs, in_buf) == EOF)
-      return EOF;
+  /* finished with header, on to data */
 
-    return 0;
-    */
+  /* inflate() returns Z_OK if some progress has been made (more input
+   * processed or more output produced), Z_STREAM_END if the end of the
+   * compressed data has been reached and all uncompressed output has been
+   * produced, Z_NEED_DICT if a preset dictionary is needed at this point,
+   * Z_DATA_ERROR if the input data was corrupted (input stream not conforming
+   * to the zlib format or incorrect check value), Z_STREAM_ERROR if the stream
+   * structure was inconsistent (for example if next_in or next_out was NULL),
+   * Z_MEM_ERROR if there was not enough memory, Z_BUF_ERROR if no progress is
+   * possible or if there was not enough room in the output buffer when
+   * Z_FINISH is used. Note that Z_BUF_ERROR is not fatal, and inflate() can be
+   * called again with more input and more output space to continue
+   * decompressing. If Z_DATA_ERROR is returned, the application may then call
+   * inflateSync() to look for a good compression block if a partial recovery
+   * of the data is desired.  */
+  while (1)
+    {
+      unsigned char *read_start = state->zs->next_in;
+
+      int status = inflate (state->zs, Z_NO_FLUSH);
+      if (status == Z_DATA_ERROR)
+        {
+          fprintf (stderr, PROGRAM_NAME ": info: purported gzip chunk has bad data: %s\n", state->zs->msg);
+          return -1;
+        }
+      else if (status == Z_NEED_DICT)
+        {
+          fprintf (stderr, PROGRAM_NAME ": error: inflate returned Z_NEED_DICT: contingency unimplemented\n");
+          exit (5);
+        }
+      else if (status != Z_OK && status != Z_STREAM_END)
+        {
+          fprintf (stderr, PROGRAM_NAME ": error: inflate returned unexpected status %d: probably indicates a bug in this program\n", status);
+          exit (6);
+        }
+
+      g_string_append_len (state->chunk_buf, (char *) read_start, state->zs->next_in - read_start);  
+
+      refresh_in_buf (state->fin, state->zs, state->in_buf);
+      state->zs->next_out = (unsigned char *) state->out_buf->str;
+      state->zs->avail_out = state->out_buf->allocated_len;
+
+      if (status == Z_STREAM_END)
+        {
+          /* reached the end of the chunk */
+          return state->chunk_buf->len;
+        }
+    }
+
+  return state->chunk_buf->len;
 }
 
+static int
+find_magic (struct gzelide_state *state)
+{
+  fprintf (stderr, PROGRAM_NAME ": error: find_magic: unimplemented\n");
+  exit (4);
+}
+
+#if 0
 static char const *
 z_status_string (int z_status)
 {
@@ -286,21 +335,6 @@ z_status_string (int z_status)
         snprintf (buf, sizeof (buf), "unknown status %d", z_status);
         return buf;
     }
-}
-
-/* returns number of uncompressed bytes read */
-static int
-uncompress_data (FILE     *fin, 
-                 z_stream *zs,
-                 GString  *in_buf,
-                 GString  *out_buf)
-{
-  int avail_out_before = zs->avail_out;
-
-  int status = inflate(zs, Z_NO_FLUSH);
-  fprintf (stderr, PROGRAM_NAME ": info: inflate returned %s\n", z_status_string (status));
-
-  return avail_out_before - zs->avail_out;
 }
 #endif
 
@@ -328,8 +362,8 @@ main (int    argc,
       if (chunk_size > 0) 
         {
           g_assert (chunk_size == state.chunk_buf->len);
-          fprintf (stderr, PROGRAM_NAME ": info: writing good chunk\n");
-          fwrite (state.chunk_buf->str, 1, state.chunk_buf->len, state.fout);
+          fprintf (stderr, PROGRAM_NAME ": info: writing good chunk of length %d\n", chunk_size);
+          /* fwrite (state.chunk_buf->str, 1, state.chunk_buf->len, state.fout); */
         }
       else if (chunk_size < 0)
         {
