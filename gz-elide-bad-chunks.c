@@ -29,12 +29,13 @@
 
 struct gzelide_state
 {
-  FILE     *fin;
-  FILE     *fout;
-  z_stream *zs;
-  GString  *in_buf;
-  GString  *out_buf;
-  GString  *chunk_buf;
+  FILE          *fin;
+  FILE          *fout;
+  z_stream      *zs;
+  GString       *in_buf;
+  GString       *out_buf;
+  GString       *chunk_buf;
+  unsigned long  crc;
 };
 
 /* gzip flag byte */
@@ -47,25 +48,6 @@ struct gzelide_state
 
 static size_t const BUF_SIZE = 4096; 
 static unsigned char const GZ_MAGIC[] = { 0x1f, 0x8b };
-static alloc_func DEFAULT_ZALLOC = NULL;
-static free_func DEFAULT_FREE = NULL;
-
-static void 
-zalloc (void   *opaque,
-        size_t  count,
-        size_t  size)
-{
-  fprintf (stderr, PROGRAM_NAME ": info: zalloc() opaque=%p count=%zu size=%zu\n", opaque, count, size);
-  DEFAULT_ZALLOC (opaque, count, size);
-}
-
-static void 
-zfree (void *opaque,
-       void *address)
-{
-  fprintf (stderr, PROGRAM_NAME ": info: zfree() opaque=%p address=%p\n", opaque, address);
-  DEFAULT_FREE (opaque, address);
-}
 
 static void *
 xmalloc (size_t size)
@@ -142,11 +124,6 @@ init_z_stream (struct gzelide_state *state)
       fprintf (stderr, PROGRAM_NAME ": error: inflateInit2: %s\n", state->zs->msg);
       exit (1);
     }
-
-  DEFAULT_ZALLOC = state->zs->zalloc;
-  DEFAULT_FREE = state->zs->zfree;
-  state->zs->zalloc = (alloc_func) zalloc;
-  state->zs->zfree = zfree;
 }
 
 /* returns EOF on eof */
@@ -178,32 +155,29 @@ next_chunk_byte (struct gzelide_state *state)
   return byte;
 }
 
-/* returns chunk size, or 0 on EOF, or -1 on bad gzip data */
-static int
-read_chunk (struct gzelide_state *state)
+static gboolean
+read_header (struct gzelide_state *state)
 {
-  g_string_set_size (state->chunk_buf, 0);
-
   int i;
   for (i = 0; i < sizeof (GZ_MAGIC); i++)
     if (next_chunk_byte (state) != GZ_MAGIC[i])
       {
         fprintf (stderr, PROGRAM_NAME ": info: purported gzip chunk doesn't start with gzip magic header\n");
-        return -1;
+        return FALSE;
       }
 
   int byte = next_chunk_byte (state);
   if (byte != Z_DEFLATED)
     {
       fprintf (stderr, PROGRAM_NAME ": info: purported gzip chunk has method != Z_DEFLATED\n");
-      return -1;
+      return FALSE;
     }
 
   int flags = next_chunk_byte (state);
   if ((flags & RESERVED) != 0)
     {
       fprintf (stderr, PROGRAM_NAME ": info: purported gzip chunk has reserved bits set\n");
-      return -1;
+      return FALSE;
     }
   
   /* discard time, xflags and os code */
@@ -251,16 +225,22 @@ read_chunk (struct gzelide_state *state)
       fprintf (stderr, PROGRAM_NAME ": info: gzip head crc: %02x%02x\n", head_crc[0], head_crc[1]);
     }
 
-  /* finished with header, on to data */
+  return TRUE;
+}
 
+static gboolean
+read_data (struct gzelide_state *state)
+{
   if (inflateReset (state->zs) != Z_OK) 
     {
       fprintf (stderr, PROGRAM_NAME ": error: inflateReset failed: probably indicates a bug in this program\n");
       exit (6);
     }
-  unsigned long crc = crc32 (0l, NULL, 0);
 
-  while (1)
+  state->crc = crc32 (0l, NULL, 0);
+
+  int status = Z_OK;
+  while (status != Z_STREAM_END)
     {
       refresh_in_buf (state->fin, state->zs, state->in_buf);
       state->zs->next_out = (unsigned char *) state->out_buf->str;
@@ -270,10 +250,11 @@ read_chunk (struct gzelide_state *state)
       unsigned char *next_out_before = state->zs->next_out;
 
       int status = inflate (state->zs, Z_NO_FLUSH);
+
       if (status == Z_DATA_ERROR)
         {
           fprintf (stderr, PROGRAM_NAME ": info: purported gzip chunk has bad data: %s\n", state->zs->msg);
-          return -1;
+          return FALSE;
         }
       else if (status == Z_NEED_DICT)
         {
@@ -287,44 +268,58 @@ read_chunk (struct gzelide_state *state)
         }
 
       g_string_append_len (state->chunk_buf, (char *) next_in_before, state->zs->next_in - next_in_before);  
-      crc = crc32 (crc, next_out_before, state->zs->next_out - next_out_before);
 
-      if (status == Z_STREAM_END)
-        {
-          unsigned long purported_crc = next_chunk_byte (state);
-          purported_crc += ((unsigned) next_chunk_byte (state)) << 8;
-          purported_crc += ((unsigned) next_chunk_byte (state)) << 16;
-          purported_crc += ((unsigned) next_chunk_byte (state)) << 24;
-
-          if (purported_crc != crc)
-            {
-              fprintf (stderr, PROGRAM_NAME ": info: purported crc %lu does not match computed crc %lu\n", 
-                  purported_crc, crc);
-              return -1;
-            }
-
-          unsigned long purported_uncompressed_bytes = next_chunk_byte (state);
-          purported_uncompressed_bytes += ((unsigned) next_chunk_byte (state)) << 8;
-          purported_uncompressed_bytes += ((unsigned) next_chunk_byte (state)) << 16;
-          if (peek_byte (state) == EOF)
-            {
-              fprintf (stderr, PROGRAM_NAME ": info: purported gzip chunk ends in middle of trailing crc+size bytes\n");
-              return -1;
-            }
-          purported_uncompressed_bytes += ((unsigned) next_chunk_byte (state)) << 24;
-
-          if (purported_uncompressed_bytes != state->zs->total_out)
-            {
-              fprintf (stderr, PROGRAM_NAME ": info: purported uncompressed size %lu bytes does not match actual uncompressed size %lu bytes\n", 
-                  purported_uncompressed_bytes, state->zs->total_out); 
-              return -1;
-            }
-
-          return state->chunk_buf->len;
-        }
+      state->crc = crc32 (state->crc, next_out_before, state->zs->next_out - next_out_before);
     }
 
-  return state->chunk_buf->len;
+  return TRUE;
+}
+
+static gboolean
+read_footer (struct gzelide_state *state)
+{
+  unsigned long purported_crc = next_chunk_byte (state);
+  purported_crc += ((unsigned) next_chunk_byte (state)) << 8;
+  purported_crc += ((unsigned) next_chunk_byte (state)) << 16;
+  purported_crc += ((unsigned) next_chunk_byte (state)) << 24;
+
+  if (purported_crc != state->crc)
+    {
+      fprintf (stderr, PROGRAM_NAME ": info: purported crc %lu does not match computed crc %lu\n", 
+          purported_crc, state->crc);
+      return FALSE;
+    }
+
+  unsigned long purported_uncompressed_bytes = next_chunk_byte (state);
+  purported_uncompressed_bytes += ((unsigned) next_chunk_byte (state)) << 8;
+  purported_uncompressed_bytes += ((unsigned) next_chunk_byte (state)) << 16;
+  if (peek_byte (state) == EOF)
+    {
+      fprintf (stderr, PROGRAM_NAME ": info: purported gzip chunk ends in middle of 8 byte footer\n");
+      return FALSE;
+    }
+  purported_uncompressed_bytes += ((unsigned) next_chunk_byte (state)) << 24;
+
+  if (purported_uncompressed_bytes != state->zs->total_out)
+    {
+      fprintf (stderr, PROGRAM_NAME ": info: purported uncompressed size %lu bytes does not match actual uncompressed size %lu bytes\n", 
+          purported_uncompressed_bytes, state->zs->total_out); 
+      return FALSE;
+    }
+
+  return TRUE;
+}
+
+
+/* returns true if it reads a valid gzip chunk, false if not */
+static gboolean
+read_chunk (struct gzelide_state *state)
+{
+  g_string_set_size (state->chunk_buf, 0);
+
+  return read_header (state) 
+    && read_data (state)
+    && read_footer (state);
 }
 
 static int
@@ -354,13 +349,12 @@ main (int    argc,
 
   while (peek_byte (&state) != EOF)
     {
-      int chunk_size = read_chunk (&state);
-      if (chunk_size > 0) 
+      if (read_chunk (&state))
         {
-          fprintf (stderr, PROGRAM_NAME ": info: writing good chunk of length %d\n", chunk_size);
+          fprintf (stderr, PROGRAM_NAME ": info: writing good chunk of length %ld\n", state.chunk_buf->len);
           /* fwrite (state.chunk_buf->str, 1, state.chunk_buf->len, state.fout); */
         }
-      else if (chunk_size < 0)
+      else
         {
           fprintf (stderr, PROGRAM_NAME ": info: eliding bad chunk\n");
           find_magic (&state);
