@@ -16,19 +16,6 @@
  * See the License for the specific language governing permissions and
  * limitations under the License.
  */
- 
-#include <glib.h>
-#include <stdio.h>
-#include <stdlib.h>
-#include <locale.h>
-#include <zlib.h>
-#include <errno.h>
-#include <string.h>
-
-#define PROGRAM_NAME "gz-elide-bad-chunks"
-
-static size_t const BUF_SIZE = 4096; 
-static unsigned char const GZ_MAGIC[] = { 0x1f, 0x8b };
 
 #if 0
 typedef struct z_stream_s {
@@ -52,8 +39,48 @@ typedef struct z_stream_s {
     uLong   reserved;   /* reserved for future use */
 } z_stream;
 #endif
+ 
+#include <glib.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <locale.h>
+#include <zlib.h>
+#include <errno.h>
+#include <string.h>
 
-void *
+#define PROGRAM_NAME "gz-elide-bad-chunks"
+
+/* gzip flag byte */
+#define ASCII_FLAG   0x01 /* bit 0 set: file probably ascii text */
+#define HEAD_CRC     0x02 /* bit 1 set: header CRC present */
+#define EXTRA_FIELD  0x04 /* bit 2 set: extra field present */
+#define ORIG_NAME    0x08 /* bit 3 set: original file name present */
+#define COMMENT      0x10 /* bit 4 set: file comment present */
+#define RESERVED     0xE0 /* bits 5..7: reserved */
+
+static size_t const BUF_SIZE = 4096; 
+static unsigned char const GZ_MAGIC[] = { 0x1f, 0x8b };
+static alloc_func DEFAULT_ZALLOC = NULL;
+static free_func DEFAULT_FREE = NULL;
+
+static void 
+zalloc (void   *opaque,
+        size_t  count,
+        size_t  size)
+{
+  fprintf (stderr, PROGRAM_NAME ": info: zalloc() opaque=%p count=%zu size=%zu\n", opaque, count, size);
+  DEFAULT_ZALLOC (opaque, count, size);
+}
+
+static void 
+zfree (void *opaque,
+       void *address)
+{
+  fprintf (stderr, PROGRAM_NAME ": info: zfree() opaque=%p address=%p\n", opaque, address);
+  DEFAULT_FREE (opaque, address);
+}
+
+static void *
 xmalloc (size_t size)
 {
   void *ptr = malloc (size);
@@ -65,7 +92,7 @@ xmalloc (size_t size)
   return ptr;
 }
 
-size_t 
+static size_t 
 xfread (FILE   *fin, 
         void   *buf, 
         size_t  nbytes)
@@ -80,36 +107,38 @@ xfread (FILE   *fin,
   return bytes_read;
 }
 
-static alloc_func DEFAULT_ZALLOC = NULL;
-static free_func DEFAULT_FREE = NULL;
-
-static void 
-zalloc (void   *opaque,
-        size_t  count,
-        size_t  size)
+/* 1. if there's no space in the buffer, resets it
+ * 2. tries to fill buffer */
+static void
+refresh_in_buf (FILE     *fin, 
+                z_stream *zs,
+                GString  *in_buf)
 {
-  fprintf (stderr, PROGRAM_NAME ": info: zalloc() opaque=%p count=%zu size=%zu\n", opaque, count, size);
-  DEFAULT_ZALLOC (opaque, count, size);
-}
+  int unused_bytes = in_buf->str + in_buf->allocated_len - ((char *) zs->next_in + zs->avail_in);
+  if (unused_bytes == 0)
+    {
+      memmove (in_buf->str, zs->next_in, zs->avail_in);
+      zs->next_in = (Bytef *) in_buf->str;
+    }
 
-void 
-zfree (void *opaque,
-       void *address)
-{
-  fprintf (stderr, PROGRAM_NAME ": info: zfree() opaque=%p address=%p\n", opaque, address);
-  DEFAULT_FREE (opaque, address);
+  unused_bytes = in_buf->str + in_buf->allocated_len - ((char *) zs->next_in + zs->avail_in);
+  g_assert (unused_bytes > 0);
+
+  size_t bytes_read = xfread (fin, zs->next_in + zs->avail_in, unused_bytes);
+  zs->avail_in += bytes_read;
 }
 
 /* return value must be freed */
-z_stream *
+static z_stream *
 init_gzip_input (FILE    *fin,
                  GString *in_buf,
                  GString *out_buf)
 {
   z_stream *zs = xmalloc (sizeof (z_stream));
 
-  zs->avail_in = xfread (fin, (void *) in_buf->str, in_buf->allocated_len);
   zs->next_in = (Bytef *) in_buf->str;
+  zs->avail_in = 0;
+  refresh_in_buf (fin, zs, in_buf);
 
   zs->next_out = (Bytef *) out_buf->str;
   zs->avail_out = out_buf->allocated_len;
@@ -121,7 +150,7 @@ init_gzip_input (FILE    *fin,
   int status = inflateInit (zs);
   if (status != Z_OK)
     {
-      fprintf (stdout, PROGRAM_NAME ": error: inflateInit: %s\n", zs->msg);
+      fprintf (stderr, PROGRAM_NAME ": error: inflateInit: %s\n", zs->msg);
       exit (1);
     }
 
@@ -133,38 +162,35 @@ init_gzip_input (FILE    *fin,
   return zs;
 }
 
+/* returns EOF on eof */
+static int
+peek_byte (FILE     *fin, 
+           z_stream *zs,
+           GString  *in_buf)
+{
+  if (zs->avail_in == 0) 
+    refresh_in_buf (fin, zs, in_buf);
+
+  if (zs->avail_in == 0)
+    return EOF;
+
+  return (int) (unsigned char) zs->next_in[0];
+}
+
+/* returns EOF on eof */
 static int
 get_byte (FILE     *fin, 
           z_stream *zs,
-          GString  *in_buf,
-          GString  *out_buf)
+          GString  *in_buf)
 {
-  if (zs->avail_in == 0) 
+  int byte = peek_byte (fin, zs, in_buf);
+
+  if (byte != EOF)
     {
-      /* XXX xfread() ... */
+      zs->avail_in--;
+      zs->next_in++;
     }
-  /*
-    {
-      errno = 0;
-      */
-  /*
-    if (s->z_eof) return EOF;
-    if (s->stream.avail_in == 0) {
-        errno = 0;
-        s->stream.avail_in = (uInt)fread(s->inbuf, 1, Z_BUFSIZE, s->file);
-        if (s->stream.avail_in == 0) {
-            s->z_eof = 1;
-            if (ferror(s->file)) s->z_err = Z_ERRNO;
-            return EOF;
-        }
-        s->stream.next_in = s->inbuf;
-    }
-    s->stream.avail_in--;
-    return *(s->stream.next_in)++;
-    */
-  int byte = zs->next_in[0];
-  zs->avail_in--;
-  zs->next_in++;
+
   return byte;
 }
 
@@ -174,58 +200,79 @@ read_header (FILE     *fin,
              GString  *in_buf,
              GString  *out_buf)
 {
-  if (get_byte (fin, zs, in_buf, out_buf) != GZ_MAGIC[0]
-      || get_byte (fin, zs, in_buf, out_buf) != GZ_MAGIC[1])
+  int flags;
+  int byte;
+  int i;
+
+  for (i = 0; i < sizeof (GZ_MAGIC); i++)
+    if (get_byte (fin, zs, in_buf) != GZ_MAGIC[i])
+      {
+        fprintf (stderr, PROGRAM_NAME ": error: input doesn't start with gzip magic header\n");
+        exit (4);
+      }
+
+  byte = get_byte (fin, zs, in_buf);
+  fprintf (stderr, PROGRAM_NAME ": info: method=0x%02x\n", byte);
+  if (byte != Z_DEFLATED)
     {
-      fprintf (stderr, PROGRAM_NAME ": error: input doesn't start with gzip magic header\n");
-      exit (4);
-    }
-  /*
-  if (zs->avail_in < sizeof (GZ_MAGIC)) 
-    {
-        ssize_t bytes_read = xread (fin, zs->next_in + zs->avail_in, in_buf->len - zs->avail_in);
-        zs->avail_in += bytes_read;
-    }
-  if (zs->avail_in < sizeof (GZ_MAGIC))
-    {
-      fprintf (stderr, PROGRAM_NAME ": error: not enough input available?\n");
+      fprintf (stderr, PROGRAM_NAME ": error: method != Z_DEFLATED\n");
       exit (5);
     }
 
-  if (memcmp (zs->next_in, GZ_MAGIC, sizeof (GZ_MAGIC)) != 0)
+  flags = get_byte (fin, zs, in_buf);
+  fprintf (stderr, PROGRAM_NAME ": info: flags=0x%02x\n", flags);
+  if ((flags & RESERVED) != 0)
     {
-      fprintf (stderr, PROGRAM_NAME ": error: input doesn't start with gzip magic header\n");
-      exit (4);
+      fprintf (stderr, PROGRAM_NAME ": error: flags byte has reserved bits set\n");
+      exit (6);
+    }
+  
+  /* discard time, xflags and os code */
+  for (i = 0; i < 6; i++) 
+    get_byte (fin, zs, in_buf);
+
+  if ((flags & EXTRA_FIELD) != 0)  
+    { 
+      fprintf (stderr, PROGRAM_NAME ": info: flags byte indicates there is an extra field\n");
+
+      unsigned len = (unsigned) get_byte (fin, zs, in_buf);
+      len += ((unsigned) get_byte (fin, zs, in_buf)) << 8;
+
+      /* len is garbage if EOF but the loop below will quit anyway */
+      while (len-- != 0 && get_byte (fin, zs, in_buf) != EOF);
     }
 
-  zs->avail_in -= sizeof (GZ_MAGIC);
-  zs->next_in += sizeof (GZ_MAGIC);
-  */
+  if ((flags & ORIG_NAME) != 0) 
+    {
+      GString *tmp_str = g_string_new ("");
+      for (byte = get_byte (fin, zs, in_buf); 
+           byte != 0 && byte != EOF; 
+           byte = get_byte (fin, zs, in_buf))
+        g_string_append_c (tmp_str, byte);
+      fprintf (stderr, PROGRAM_NAME ": info: original name of gzipped file: %s\n", tmp_str->str);
+      g_string_free (tmp_str, TRUE);
+    }
+
+  if ((flags & COMMENT) != 0) 
+    {
+      GString *tmp_str = g_string_new ("");
+      for (byte = get_byte (fin, zs, in_buf); 
+           byte != 0 && byte != EOF; 
+           byte = get_byte (fin, zs, in_buf))
+        g_string_append_c (tmp_str, byte);
+      fprintf (stderr, PROGRAM_NAME ": info: original name of gzipped file: %s\n", tmp_str->str);
+      g_string_free (tmp_str, TRUE);
+    }
+
+    if ((flags & HEAD_CRC) != 0) 
+      { 
+        int head_crc[2];
+        head_crc[0] = get_byte (fin, zs, in_buf);
+        head_crc[1] = get_byte (fin, zs, in_buf);
+        // for (len = 0; len < 2; len++) (void)get_byte(s);
+      }
 
 #if 0
-    /* Check the rest of the gzip header */
-    method = get_byte(s);
-    flags = get_byte(s);
-    if (method != Z_DEFLATED || (flags & RESERVED) != 0) {
-        s->z_err = Z_DATA_ERROR;
-        return;
-    }
-
-    /* Discard time, xflags and OS code: */
-    for (len = 0; len < 6; len++) (void)get_byte(s);
-
-    if ((flags & EXTRA_FIELD) != 0) { /* skip the extra field */
-        len  =  (uInt)get_byte(s);
-        len += ((uInt)get_byte(s))<<8;
-        /* len is garbage if EOF but the loop below will quit anyway */
-        while (len-- != 0 && get_byte(s) != EOF) ;
-    }
-    if ((flags & ORIG_NAME) != 0) { /* skip the original file name */
-        while ((c = get_byte(s)) != 0 && c != EOF) ;
-    }
-    if ((flags & COMMENT) != 0) {   /* skip the .gz file comment */
-        while ((c = get_byte(s)) != 0 && c != EOF) ;
-    }
     if ((flags & HEAD_CRC) != 0) {  /* skip the header crc */
         for (len = 0; len < 2; len++) (void)get_byte(s);
     }
@@ -239,8 +286,11 @@ main (int    argc,
 {
   setlocale (LC_ALL, "");
 
-  GString *in_buf = g_string_sized_new (BUF_SIZE);
-  GString *out_buf = g_string_sized_new (BUF_SIZE);
+  /* all the GString stuff wants a terminating null character, so it even adds
+   * space in g_string_sized_new (), thus the BUF_SIZE-1 */
+  GString *in_buf = g_string_sized_new (BUF_SIZE - 1);
+  GString *out_buf = g_string_sized_new (BUF_SIZE - 1);
+
   z_stream *zs = init_gzip_input (stdin, in_buf, out_buf);
 
   read_header (stdin, zs, in_buf, out_buf);

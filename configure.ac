@@ -18,7 +18,7 @@ PKG_CHECK_MODULES([GLIB], [glib-2.0 >= 2.18
                            gobject-2.0 >= 2.18])
 
 AC_CHECK_HEADER([zlib.h], [], AC_MSG_ERROR([zlib header file zlib.h not found]))
-AC_CHECK_LIB([z], [gzread], [ZLIB_LIBS=-lz], AC_MSG_ERROR([zlib library libz not found]))
+AC_CHECK_LIB([z], [inflate], [ZLIB_LIBS=-lz], AC_MSG_ERROR([zlib library libz not found]))
 AC_SUBST([ZLIB_LIBS])
 
 AC_SUBST([AM_CPPFLAGS])
