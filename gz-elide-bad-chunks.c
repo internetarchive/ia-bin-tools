@@ -249,7 +249,7 @@ read_data (struct gzelide_state *state)
       unsigned char *next_in_before = state->zs->next_in;
       unsigned char *next_out_before = state->zs->next_out;
 
-      int status = inflate (state->zs, Z_NO_FLUSH);
+      status = inflate (state->zs, Z_NO_FLUSH);
 
       if (status == Z_DATA_ERROR)
         {
