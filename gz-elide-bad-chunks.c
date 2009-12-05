@@ -257,20 +257,13 @@ read_chunk (struct gzelide_state *state)
 
   /* finished with header, on to data */
 
-  /* inflate() returns Z_OK if some progress has been made (more input
-   * processed or more output produced), Z_STREAM_END if the end of the
-   * compressed data has been reached and all uncompressed output has been
-   * produced, Z_NEED_DICT if a preset dictionary is needed at this point,
-   * Z_DATA_ERROR if the input data was corrupted (input stream not conforming
-   * to the zlib format or incorrect check value), Z_STREAM_ERROR if the stream
-   * structure was inconsistent (for example if next_in or next_out was NULL),
-   * Z_MEM_ERROR if there was not enough memory, Z_BUF_ERROR if no progress is
-   * possible or if there was not enough room in the output buffer when
-   * Z_FINISH is used. Note that Z_BUF_ERROR is not fatal, and inflate() can be
-   * called again with more input and more output space to continue
-   * decompressing. If Z_DATA_ERROR is returned, the application may then call
-   * inflateSync() to look for a good compression block if a partial recovery
-   * of the data is desired.  */
+  if (inflateReset (state->zs) != Z_OK) 
+    {
+      fprintf (stderr, PROGRAM_NAME ": error: inflateReset failed: probably indicates a bug in this program\n");
+      exit (6);
+    }
+  unsigned crc = crc32 (0l, NULL, 0);
+
   while (1)
     {
       refresh_in_buf (state->fin, state->zs, state->in_buf);
@@ -386,7 +379,6 @@ main (int    argc,
       int chunk_size = read_chunk (&state);
       if (chunk_size > 0) 
         {
-          g_assert (chunk_size == state.chunk_buf->len);
           fprintf (stderr, PROGRAM_NAME ": info: writing good chunk of length %d\n", chunk_size);
           /* fwrite (state.chunk_buf->str, 1, state.chunk_buf->len, state.fout); */
         }
