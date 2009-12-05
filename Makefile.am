@@ -1,4 +1,4 @@
-# $Id: Makefile.am 6658 2009-11-16 18:38:03Z nlevitt $
+# $Id$
 
 bin_PROGRAMS = bin-search gz-elide-bad-chunks
 

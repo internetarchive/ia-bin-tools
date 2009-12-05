@@ -1,4 +1,4 @@
-/* $Id: bin_search.c 6459 2009-08-14 23:17:08Z nlevitt $
+/* $Id$
  *
  * vim: set sw=2 et:
  *
@@ -260,7 +260,7 @@ read_header (FILE     *fin,
            byte != 0 && byte != EOF; 
            byte = get_byte (fin, zs, in_buf))
         g_string_append_c (tmp_str, byte);
-      fprintf (stderr, PROGRAM_NAME ": info: original name of gzipped file: %s\n", tmp_str->str);
+      fprintf (stderr, PROGRAM_NAME ": info: gzip header comment: %s\n", tmp_str->str);
       g_string_free (tmp_str, TRUE);
     }
 
@@ -269,15 +269,50 @@ read_header (FILE     *fin,
         int head_crc[2];
         head_crc[0] = get_byte (fin, zs, in_buf);
         head_crc[1] = get_byte (fin, zs, in_buf);
-        // for (len = 0; len < 2; len++) (void)get_byte(s);
       }
 
-#if 0
-    if ((flags & HEAD_CRC) != 0) {  /* skip the header crc */
-        for (len = 0; len < 2; len++) (void)get_byte(s);
+    /*
+    if (peek_byte (fin, zs, in_buf) == EOF)
+      return EOF;
+
+    return 0;
+    */
+}
+
+static char const *
+z_status_string (int z_status)
+{
+  static char buf[40];
+  switch (z_status)
+    {
+      case Z_OK: return "Z_OK";
+      case Z_STREAM_END: return "Z_STREAM_END";
+      case Z_NEED_DICT: return "Z_NEED_DICT";
+      case Z_ERRNO: return "Z_ERRNO";
+      case Z_STREAM_ERROR: return "Z_STREAM_ERROR";
+      case Z_DATA_ERROR: return "Z_DATA_ERROR";
+      case Z_MEM_ERROR: return "Z_MEM_ERROR";
+      case Z_BUF_ERROR: return "Z_BUF_ERROR";
+      case Z_VERSION_ERROR: return "Z_VERSION_ERROR";
+      default:
+        snprintf (buf, sizeof (buf), "unknown status %d", z_status);
+        return buf;
     }
-    s->z_err = s->z_eof ? Z_DATA_ERROR : Z_OK;
-#endif
+}
+
+/* returns number of uncompressed bytes read */
+static int
+uncompress_data (FILE     *fin, 
+                 z_stream *zs,
+                 GString  *in_buf,
+                 GString  *out_buf)
+{
+  int avail_out_before = zs->avail_out;
+
+  int status = inflate(zs, Z_NO_FLUSH);
+  fprintf (stderr, PROGRAM_NAME ": info: inflate returned %s\n", z_status_string (status));
+
+  return avail_out_before - zs->avail_out;
 }
 
 int
@@ -287,13 +322,18 @@ main (int    argc,
   setlocale (LC_ALL, "");
 
   /* all the GString stuff wants a terminating null character, so it even adds
-   * space in g_string_sized_new (), thus the BUF_SIZE-1 */
+   * space in g_string_sized_new(), thus the BUF_SIZE-1 */
   GString *in_buf = g_string_sized_new (BUF_SIZE - 1);
   GString *out_buf = g_string_sized_new (BUF_SIZE - 1);
 
   z_stream *zs = init_gzip_input (stdin, in_buf, out_buf);
 
   read_header (stdin, zs, in_buf, out_buf);
+
+  int uncompressed_bytes;
+  while ((uncompressed_bytes = uncompress_data (stdin, zs, in_buf, out_buf)) > 0)
+    fprintf (stderr, PROGRAM_NAME ": info: %d uncompressed bytes read\n", uncompressed_bytes);
+  fprintf (stderr, PROGRAM_NAME ": info: %d uncompressed bytes read\n", uncompressed_bytes);
 
   free (zs);
   g_string_free (out_buf, TRUE);

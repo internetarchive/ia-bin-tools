@@ -1,6 +1,6 @@
 #!/bin/sh
 #
-# $Id: autogen.sh 6452 2009-08-13 22:16:56Z nlevitt $ 
+# $Id$ 
 #
 # Run this to generate all the initial makefiles, etc.
 

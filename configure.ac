@@ -1,4 +1,4 @@
-# $Id: configure.ac 6666 2009-11-17 18:54:13Z nlevitt $
+# $Id$
 
 AC_INIT([Internet Archive Tools],[0.0.1],[mailto:nlevitt@archive.org],[ia-tools])
 

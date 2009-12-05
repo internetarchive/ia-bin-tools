@@ -1,4 +1,4 @@
-/* $Id: bin-search.c 6701 2009-11-23 22:09:36Z nlevitt $
+/* $Id$
  *
  * vim: set sw=2 et:
  *
