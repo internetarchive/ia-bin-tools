@@ -147,10 +147,15 @@ init_gzip_input (FILE    *fin,
   zs->zfree = NULL;
   zs->opaque = NULL;
 
-  int status = inflateInit (zs);
+  /* Comment from gz_open() which uses inflateInit2() this way: "windowBits is
+   * passed < 0 to tell that there is no zlib header.  Note that in this case
+   * inflate *requires* an extra "dummy" byte after the compressed stream in
+   * order to complete decompression and return Z_STREAM_END. Here the gzip
+   * CRC32 ensures that 4 bytes are present after the compressed stream." */
+  int status = inflateInit2 (zs, -MAX_WBITS);
   if (status != Z_OK)
     {
-      fprintf (stderr, PROGRAM_NAME ": error: inflateInit: %s\n", zs->msg);
+      fprintf (stderr, PROGRAM_NAME ": error: inflateInit2: %s\n", zs->msg);
       exit (1);
     }
 
