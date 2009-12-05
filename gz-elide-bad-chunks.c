@@ -17,29 +17,6 @@
  * limitations under the License.
  */
 
-#if 0
-typedef struct z_stream_s {
-    Bytef    *next_in;  /* next input byte */
-    uInt     avail_in;  /* number of bytes available at next_in */
-    uLong    total_in;  /* total nb of input bytes read so far */
-
-    Bytef    *next_out; /* next output byte should be put there */
-    uInt     avail_out; /* remaining free space at next_out */
-    uLong    total_out; /* total nb of bytes output so far */
-
-    char     *msg;      /* last error message, NULL if no error */
-    struct internal_state FAR *state; /* not visible by applications */
-
-    alloc_func zalloc;  /* used to allocate the internal state */
-    free_func  zfree;   /* used to free the internal state */
-    voidpf     opaque;  /* private data object passed to zalloc and zfree */
-
-    int     data_type;  /* best guess about the data type: binary or text */
-    uLong   adler;      /* adler32 value of the uncompressed data */
-    uLong   reserved;   /* reserved for future use */
-} z_stream;
-#endif
- 
 #include <glib.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -49,6 +26,16 @@ typedef struct z_stream_s {
 #include <string.h>
 
 #define PROGRAM_NAME "gz-elide-bad-chunks"
+
+struct gzelide_state
+{
+  FILE     *fin;
+  FILE     *fout;
+  z_stream *zs;
+  GString  *in_buf;
+  GString  *out_buf;
+  GString  *chunk_buf;
+};
 
 /* gzip flag byte */
 #define ASCII_FLAG   0x01 /* bit 0 set: file probably ascii text */
@@ -129,42 +116,37 @@ refresh_in_buf (FILE     *fin,
 }
 
 /* return value must be freed */
-static z_stream *
-init_gzip_input (FILE    *fin,
-                 GString *in_buf,
-                 GString *out_buf)
+static void
+init_z_stream (struct gzelide_state *state)
 {
-  z_stream *zs = xmalloc (sizeof (z_stream));
+  state->zs = xmalloc (sizeof (z_stream));
 
-  zs->next_in = (Bytef *) in_buf->str;
-  zs->avail_in = 0;
-  refresh_in_buf (fin, zs, in_buf);
+  state->zs->next_in = (Bytef *) state->in_buf->str;
+  state->zs->avail_in = 0;
 
-  zs->next_out = (Bytef *) out_buf->str;
-  zs->avail_out = out_buf->allocated_len;
+  state->zs->next_out = (Bytef *) state->out_buf->str;
+  state->zs->avail_out = state->out_buf->allocated_len;
 
-  zs->zalloc = NULL;
-  zs->zfree = NULL;
-  zs->opaque = NULL;
+  state->zs->zalloc = NULL;
+  state->zs->zfree = NULL;
+  state->zs->opaque = NULL;
 
-  /* Comment from gz_open() which uses inflateInit2() this way: "windowBits is
-   * passed < 0 to tell that there is no zlib header.  Note that in this case
-   * inflate *requires* an extra "dummy" byte after the compressed stream in
-   * order to complete decompression and return Z_STREAM_END. Here the gzip
-   * CRC32 ensures that 4 bytes are present after the compressed stream." */
-  int status = inflateInit2 (zs, -MAX_WBITS);
+  /* Comment from copied gz_open(): "windowBits is passed < 0 to tell that
+   * there is no zlib header.  Note that in this case inflate *requires* an
+   * extra "dummy" byte after the compressed stream in order to complete
+   * decompression and return Z_STREAM_END. Here the gzip CRC32 ensures that 4
+   * bytes are present after the compressed stream." */
+  int status = inflateInit2 (state->zs, -MAX_WBITS);
   if (status != Z_OK)
     {
-      fprintf (stderr, PROGRAM_NAME ": error: inflateInit2: %s\n", zs->msg);
+      fprintf (stderr, PROGRAM_NAME ": error: inflateInit2: %s\n", state->zs->msg);
       exit (1);
     }
 
-  DEFAULT_ZALLOC = zs->zalloc;
-  DEFAULT_FREE = zs->zfree;
-  zs->zalloc = (alloc_func) zalloc;
-  zs->zfree = zfree;
-
-  return zs;
+  DEFAULT_ZALLOC = state->zs->zalloc;
+  DEFAULT_FREE = state->zs->zfree;
+  state->zs->zalloc = (alloc_func) zalloc;
+  state->zs->zfree = zfree;
 }
 
 /* returns EOF on eof */
@@ -199,6 +181,7 @@ get_byte (FILE     *fin,
   return byte;
 }
 
+#if 0
 static void
 read_header (FILE     *fin, 
              z_stream *zs,
@@ -319,6 +302,7 @@ uncompress_data (FILE     *fin,
 
   return avail_out_before - zs->avail_out;
 }
+#endif
 
 int
 main (int    argc,
@@ -326,23 +310,52 @@ main (int    argc,
 {
   setlocale (LC_ALL, "");
 
+  struct gzelide_state state;
+  state.fin = stdin;
+  state.fout = stdout;
+  state.zs = NULL;
   /* all the GString stuff wants a terminating null character, so it even adds
    * space in g_string_sized_new(), thus the BUF_SIZE-1 */
-  GString *in_buf = g_string_sized_new (BUF_SIZE - 1);
-  GString *out_buf = g_string_sized_new (BUF_SIZE - 1);
+  state.in_buf = g_string_sized_new (BUF_SIZE - 1);
+  state.out_buf = g_string_sized_new (BUF_SIZE - 1);
+  state.chunk_buf = g_string_new ("");
 
-  z_stream *zs = init_gzip_input (stdin, in_buf, out_buf);
+  init_z_stream (&state);
 
+  while (1)
+    {
+      int chunk_size = read_chunk (&state);
+      if (chunk_size > 0) 
+        {
+          g_assert (chunk_size == state.chunk_buf->len);
+          fprintf (stderr, PROGRAM_NAME ": info: writing good chunk\n");
+          fwrite (state.chunk_buf->str, 1, state.chunk_buf->len, state.fout);
+        }
+      else if (chunk_size < 0)
+        {
+          fprintf (stderr, PROGRAM_NAME ": info: eliding bad chunk\n");
+          find_magic (&state);
+        }
+      else
+        {
+          fprintf (stderr, PROGRAM_NAME ": info: reached end of input\n");
+          break;
+        }
+    }
+
+  /*
   read_header (stdin, zs, in_buf, out_buf);
 
   int uncompressed_bytes;
   while ((uncompressed_bytes = uncompress_data (stdin, zs, in_buf, out_buf)) > 0)
     fprintf (stderr, PROGRAM_NAME ": info: %d uncompressed bytes read\n", uncompressed_bytes);
   fprintf (stderr, PROGRAM_NAME ": info: %d uncompressed bytes read\n", uncompressed_bytes);
+  */
 
-  free (zs);
-  g_string_free (out_buf, TRUE);
-  g_string_free (in_buf, TRUE);
+  free (state.zs);
+  g_string_free (state.out_buf, TRUE);
+  g_string_free (state.in_buf, TRUE);
+  g_string_free (state.chunk_buf, TRUE);
 
   return 0;
 }
