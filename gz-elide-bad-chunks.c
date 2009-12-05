@@ -151,24 +151,22 @@ init_z_stream (struct gzelide_state *state)
 
 /* returns EOF on eof */
 static int
-peek_byte (FILE     *fin, 
-           z_stream *zs,
-           GString  *in_buf)
+peek_byte (struct gzelide_state *state)
 {
-  if (zs->avail_in == 0) 
-    refresh_in_buf (fin, zs, in_buf);
+  if (state->zs->avail_in == 0) 
+    refresh_in_buf (state->fin, state->zs, state->in_buf);
 
-  if (zs->avail_in == 0)
+  if (state->zs->avail_in == 0)
     return EOF;
 
-  return (int) (unsigned char) zs->next_in[0];
+  return (int) (unsigned char) state->zs->next_in[0];
 }
 
 /* returns EOF on eof */
 static int 
 next_chunk_byte (struct gzelide_state *state)
 {
-  int byte = peek_byte (state->fin, state->zs, state->in_buf);
+  int byte = peek_byte (state);
 
   if (byte != EOF)
     {
@@ -195,7 +193,6 @@ read_chunk (struct gzelide_state *state)
       }
 
   int byte = next_chunk_byte (state);
-  fprintf (stderr, PROGRAM_NAME ": info: method=0x%02x\n", byte);
   if (byte != Z_DEFLATED)
     {
       fprintf (stderr, PROGRAM_NAME ": info: purported gzip chunk has method != Z_DEFLATED\n");
@@ -203,7 +200,6 @@ read_chunk (struct gzelide_state *state)
     }
 
   int flags = next_chunk_byte (state);
-  fprintf (stderr, PROGRAM_NAME ": info: flags=0x%02x\n", flags);
   if ((flags & RESERVED) != 0)
     {
       fprintf (stderr, PROGRAM_NAME ": info: purported gzip chunk has reserved bits set\n");
@@ -262,7 +258,7 @@ read_chunk (struct gzelide_state *state)
       fprintf (stderr, PROGRAM_NAME ": error: inflateReset failed: probably indicates a bug in this program\n");
       exit (6);
     }
-  unsigned crc = crc32 (0l, NULL, 0);
+  unsigned long crc = crc32 (0l, NULL, 0);
 
   while (1)
     {
@@ -270,7 +266,8 @@ read_chunk (struct gzelide_state *state)
       state->zs->next_out = (unsigned char *) state->out_buf->str;
       state->zs->avail_out = state->out_buf->allocated_len;
 
-      unsigned char *read_start = state->zs->next_in;
+      unsigned char *next_in_before = state->zs->next_in;
+      unsigned char *next_out_before = state->zs->next_out;
 
       int status = inflate (state->zs, Z_NO_FLUSH);
       if (status == Z_DATA_ERROR)
@@ -289,36 +286,40 @@ read_chunk (struct gzelide_state *state)
           exit (6);
         }
 
-      g_string_append_len (state->chunk_buf, (char *) read_start, state->zs->next_in - read_start);  
+      g_string_append_len (state->chunk_buf, (char *) next_in_before, state->zs->next_in - next_in_before);  
+      crc = crc32 (crc, next_out_before, state->zs->next_out - next_out_before);
 
       if (status == Z_STREAM_END)
         {
-          unsigned purported_crc = next_chunk_byte (state);
+          unsigned long purported_crc = next_chunk_byte (state);
           purported_crc += ((unsigned) next_chunk_byte (state)) << 8;
           purported_crc += ((unsigned) next_chunk_byte (state)) << 16;
           purported_crc += ((unsigned) next_chunk_byte (state)) << 24;
 
-          unsigned purported_uncompressed_size = next_chunk_byte (state);
-          purported_uncompressed_size += ((unsigned) next_chunk_byte (state)) << 8;
-          purported_uncompressed_size += ((unsigned) next_chunk_byte (state)) << 16;
-          if (peek_byte (state->fin, state->zs, state->in_buf) == EOF)
+          if (purported_crc != crc)
+            {
+              fprintf (stderr, PROGRAM_NAME ": info: purported crc %lu does not match computed crc %lu\n", 
+                  purported_crc, crc);
+              return -1;
+            }
+
+          unsigned long purported_uncompressed_bytes = next_chunk_byte (state);
+          purported_uncompressed_bytes += ((unsigned) next_chunk_byte (state)) << 8;
+          purported_uncompressed_bytes += ((unsigned) next_chunk_byte (state)) << 16;
+          if (peek_byte (state) == EOF)
             {
               fprintf (stderr, PROGRAM_NAME ": info: purported gzip chunk ends in middle of trailing crc+size bytes\n");
               return -1;
             }
-          purported_uncompressed_size += ((unsigned) next_chunk_byte (state)) << 24;
-#if 0
-          /* Check CRC and original size */
-          s->crc = crc32(s->crc, start, (uInt)(s->stream.next_out - start));
-          start = s->stream.next_out;
+          purported_uncompressed_bytes += ((unsigned) next_chunk_byte (state)) << 24;
 
-          if (getLong(s) != s->crc) {
-            s->z_err = Z_DATA_ERROR;
-          } else {
-            (void)getLong(s);
-#endif
+          if (purported_uncompressed_bytes != state->zs->total_out)
+            {
+              fprintf (stderr, PROGRAM_NAME ": info: purported uncompressed size %lu bytes does not match actual uncompressed size %lu bytes\n", 
+                  purported_uncompressed_bytes, state->zs->total_out); 
+              return -1;
+            }
 
-          /* reached the end of the chunk */
           return state->chunk_buf->len;
         }
     }
@@ -332,29 +333,6 @@ find_magic (struct gzelide_state *state)
   fprintf (stderr, PROGRAM_NAME ": error: find_magic: unimplemented\n");
   exit (4);
 }
-
-#if 0
-static char const *
-z_status_string (int z_status)
-{
-  static char buf[40];
-  switch (z_status)
-    {
-      case Z_OK: return "Z_OK";
-      case Z_STREAM_END: return "Z_STREAM_END";
-      case Z_NEED_DICT: return "Z_NEED_DICT";
-      case Z_ERRNO: return "Z_ERRNO";
-      case Z_STREAM_ERROR: return "Z_STREAM_ERROR";
-      case Z_DATA_ERROR: return "Z_DATA_ERROR";
-      case Z_MEM_ERROR: return "Z_MEM_ERROR";
-      case Z_BUF_ERROR: return "Z_BUF_ERROR";
-      case Z_VERSION_ERROR: return "Z_VERSION_ERROR";
-      default:
-        snprintf (buf, sizeof (buf), "unknown status %d", z_status);
-        return buf;
-    }
-}
-#endif
 
 int
 main (int    argc,
@@ -374,7 +352,7 @@ main (int    argc,
 
   init_z_stream (&state);
 
-  while (1)
+  while (peek_byte (&state) != EOF)
     {
       int chunk_size = read_chunk (&state);
       if (chunk_size > 0) 
@@ -387,21 +365,7 @@ main (int    argc,
           fprintf (stderr, PROGRAM_NAME ": info: eliding bad chunk\n");
           find_magic (&state);
         }
-      else
-        {
-          fprintf (stderr, PROGRAM_NAME ": info: reached end of input\n");
-          break;
-        }
     }
-
-  /*
-  read_header (stdin, zs, in_buf, out_buf);
-
-  int uncompressed_bytes;
-  while ((uncompressed_bytes = uncompress_data (stdin, zs, in_buf, out_buf)) > 0)
-    fprintf (stderr, PROGRAM_NAME ": info: %d uncompressed bytes read\n", uncompressed_bytes);
-  fprintf (stderr, PROGRAM_NAME ": info: %d uncompressed bytes read\n", uncompressed_bytes);
-  */
 
   free (state.zs);
   g_string_free (state.out_buf, TRUE);
