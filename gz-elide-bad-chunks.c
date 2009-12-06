@@ -322,11 +322,34 @@ read_chunk (struct gzelide_state *state)
     && read_footer (state);
 }
 
-static int
+/* returns true if magic found, false if eof */
+static gboolean
 find_magic (struct gzelide_state *state)
 {
-  fprintf (stderr, PROGRAM_NAME ": error: find_magic: unimplemented\n");
-  exit (4);
+  while (TRUE)
+    {
+      if (state->zs->avail_in < 2)
+        refresh_in_buf (state->fin, state->zs, state->in_buf);
+
+      if (state->zs->avail_in < 2)
+        {
+          if (state->zs->avail_in == 1)
+            {
+              /* advance to eof */
+              state->zs->avail_in--;
+              state->zs->next_in++;
+              g_assert (peek_byte (state) == EOF);
+            }
+          return FALSE;
+        }
+
+      if (state->zs->next_in[0] == GZ_MAGIC[0])
+        if (state->zs->next_in[1] == GZ_MAGIC[1])
+          return TRUE;
+
+      state->zs->avail_in--;
+      state->zs->next_in++;
+    }
 }
 
 int
