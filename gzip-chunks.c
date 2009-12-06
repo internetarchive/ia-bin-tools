@@ -109,10 +109,7 @@ xmalloc (size_t size)
 {
   void *ptr = malloc (size);
   if (ptr == NULL)
-    {
-      die ("virtual memory exhausted");
-      exit (2);
-    }
+    die ("virtual memory exhausted");
   return ptr;
 }
 
@@ -124,10 +121,7 @@ xfread (FILE   *fin,
   errno = 0;
   size_t bytes_read = fread (buf, 1, nbytes, fin);
   if (ferror (fin))
-    {
-      die ("fread: %s", g_strerror (errno));
-      exit (3);
-    }
+    die ("fread: %s", g_strerror (errno));
   return bytes_read;
 }
 
@@ -162,7 +156,7 @@ init_state (GzipChunksState   *state,
     {
       fprintf (stderr, "%s: error: at most one input filename allowed\n\n", g_get_prgname ());
       fputs (g_option_context_get_help (context, TRUE, NULL), stderr);
-      exit (2);
+      exit (1);
     }
 
   if (*argc == 2)
