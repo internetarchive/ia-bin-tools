@@ -41,12 +41,12 @@ typedef struct
 } GzipChunksState;
 
 /* gzip flag byte */
-#define ASCII_FLAG   0x01 /* bit 0 set: file probably ascii text */
-#define HEAD_CRC     0x02 /* bit 1 set: header CRC present */
-#define EXTRA_FIELD  0x04 /* bit 2 set: extra field present */
-#define ORIG_NAME    0x08 /* bit 3 set: original file name present */
-#define COMMENT      0x10 /* bit 4 set: file comment present */
-#define RESERVED     0xE0 /* bits 5..7: reserved */
+static const int ASCII_FLAG  = 0x01; /* bit 0 set: file probably ascii text */
+static const int HEAD_CRC    = 0x02; /* bit 1 set: header CRC present */
+static const int EXTRA_FIELD = 0x04; /* bit 2 set: extra field present */
+static const int ORIG_NAME   = 0x08; /* bit 3 set: original file name present */
+static const int COMMENT     = 0x10; /* bit 4 set: file comment present */
+static const int RESERVED    = 0xE0; /* bits 5..7: reserved */
 
 static size_t const BUF_SIZE = 4096; 
 static unsigned char const GZ_MAGIC[] = { 0x1f, 0x8b };
@@ -65,7 +65,7 @@ static GOptionEntry entries[] =
 {
   { "verbose", '\0', 0, G_OPTION_ARG_NONE, &options.verbose, "report verbosely on gzip doings", NULL },
   { "output", 'o', 0, G_OPTION_ARG_STRING, &options.output_file, "file to write (defaults to stdout)", NULL },
-  { "invalid", 'x', 0, G_OPTION_ARG_NONE, &options.split_dir, "invert the operation - write chunks of file that are NOT valid gzip chunks", NULL },
+  { "invalid", 'x', 0, G_OPTION_ARG_NONE, &options.split_dir, "invert the operation - write chunks that are NOT valid gzip chunks", NULL },
   { "split", '\0', 0, G_OPTION_ARG_NONE, &options.split, "write each chunk to a separate file, in a randomly named directory in temp space", NULL },
   { "split-dir", 'd', 0, G_OPTION_ARG_STRING, &options.split_dir, "write each chunk separate file in the specified directory", NULL },
   { NULL }
