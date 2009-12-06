@@ -1,6 +1,6 @@
 # $Id$
 
-bin_PROGRAMS = bin-search gz-elide-bad-chunks
+bin_PROGRAMS = bin-search gzip-chunks
 
 bin_search_SOURCES = \
 	bin-search.c	
@@ -22,23 +22,23 @@ bin_search_LDADD = \
 	$(GLIB_LIBS)	\
  	$(INTLLIBS)
 
-gz_elide_bad_chunks_SOURCES = \
-	gz-elide-bad-chunks.c
+gzip_chunks_SOURCES = \
+	gzip-chunks.c
 
-gz_elide_bad_chunks_CPPFLAGS = \
+gzip_chunks_CPPFLAGS = \
 	-I$(top_srcdir)		\
 	$(DISABLE_DEPRECATED)	\
 	$(AM_CPPFLAGS)
 
-gz_elide_bad_chunks_CFLAGS = \
+gzip_chunks_CFLAGS = \
 	$(GLIB_CFLAGS)	\
 	$(WARN_CFLAGS)		\
 	$(AM_CFLAGS)
 
-gz_elide_bad_chunks_LDFLAGS = \
+gzip_chunks_LDFLAGS = \
 	$(AM_LDFLAGS)
 
-gz_elide_bad_chunks_LDADD = \
+gzip_chunks_LDADD = \
 	$(ZLIB_LIBS)	\
 	$(GLIB_LIBS)	\
  	$(INTLLIBS)
