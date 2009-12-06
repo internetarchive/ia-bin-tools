@@ -298,7 +298,7 @@ read_footer (struct gzelide_state *state)
   purported_uncompressed_bytes += ((unsigned) next_chunk_byte (state)) << 16;
   if (peek_byte (state) == EOF)
     {
-      fprintf (stderr, PROGRAM_NAME ": info: purported gzip chunk ends in middle of 8 byte footer\n");
+      /* fprintf (stderr, PROGRAM_NAME ": info: purported gzip chunk ends in middle of 8 byte footer\n"); */
       return FALSE;
     }
   purported_uncompressed_bytes += ((unsigned) next_chunk_byte (state)) << 24;
@@ -381,16 +381,16 @@ main (int    argc,
     {
       if (read_chunk (&state))
         {
-          /*
-          fprintf (stderr, PROGRAM_NAME ": info: writing good chunk offset=%lld length=%ld\n", 
-              state.chunk_offset, state.chunk_buf->len);
-              */
           if (elision_offset > 0)
             {
               fprintf (stderr, PROGRAM_NAME ": info: elided %lld bytes starting at offset %lld\n", 
                   state.chunk_offset - elision_offset, elision_offset);
               elision_offset = -1;
             }
+          /*
+          fprintf (stderr, PROGRAM_NAME ": info: writing good chunk offset=%lld length=%ld\n", 
+              state.chunk_offset, state.chunk_buf->len);
+              */
           fwrite (state.chunk_buf->str, 1, state.chunk_buf->len, state.fout);
         }
       else
