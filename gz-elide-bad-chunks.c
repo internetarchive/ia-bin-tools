@@ -384,7 +384,7 @@ main (int    argc,
           if (elision_offset > 0)
             {
               fprintf (stderr, PROGRAM_NAME ": info: elided %lld bytes starting at offset %lld\n", 
-                  state.chunk_offset - elision_offset, elision_offset);
+                  (long long) (state.chunk_offset - elision_offset), (long long) elision_offset);
               elision_offset = -1;
             }
           /*
@@ -404,7 +404,7 @@ main (int    argc,
   if (elision_offset > 0)
     {
       fprintf (stderr, PROGRAM_NAME ": info: elided %lld bytes starting at offset %lld\n", 
-          ftello (state.fin) - elision_offset, elision_offset);
+          (long long) (ftello (state.fin) - elision_offset), (long long) elision_offset);
     }
 
   free (state.zs);
