@@ -35,6 +35,7 @@ struct gzelide_state
   GString       *in_buf;
   GString       *out_buf;
   GString       *chunk_buf;
+  off_t          chunk_offset;
   unsigned long  crc;
 };
 
@@ -162,21 +163,21 @@ read_header (struct gzelide_state *state)
   for (i = 0; i < sizeof (GZ_MAGIC); i++)
     if (next_chunk_byte (state) != GZ_MAGIC[i])
       {
-        fprintf (stderr, PROGRAM_NAME ": info: purported gzip chunk doesn't start with gzip magic header\n");
+        /* fprintf (stderr, PROGRAM_NAME ": info: purported gzip chunk doesn't start with gzip magic header\n"); */
         return FALSE;
       }
 
   int byte = next_chunk_byte (state);
   if (byte != Z_DEFLATED)
     {
-      fprintf (stderr, PROGRAM_NAME ": info: purported gzip chunk has method != Z_DEFLATED\n");
+      /* fprintf (stderr, PROGRAM_NAME ": info: purported gzip chunk has method != Z_DEFLATED\n"); */
       return FALSE;
     }
 
   int flags = next_chunk_byte (state);
   if ((flags & RESERVED) != 0)
     {
-      fprintf (stderr, PROGRAM_NAME ": info: purported gzip chunk has reserved bits set\n");
+      /* fprintf (stderr, PROGRAM_NAME ": info: purported gzip chunk has reserved bits set\n"); */
       return FALSE;
     }
   
@@ -186,7 +187,7 @@ read_header (struct gzelide_state *state)
 
   if ((flags & EXTRA_FIELD) != 0)  
     { 
-      fprintf (stderr, PROGRAM_NAME ": info: flags byte indicates there is an extra field\n");
+      /* fprintf (stderr, PROGRAM_NAME ": info: flags byte indicates there is an extra field\n"); */
 
       unsigned len = (unsigned) next_chunk_byte (state);
       len += ((unsigned) next_chunk_byte (state)) << 8;
@@ -202,7 +203,7 @@ read_header (struct gzelide_state *state)
            byte != 0 && byte != EOF; 
            byte = next_chunk_byte (state))
         g_string_append_c (tmp_str, byte);
-      fprintf (stderr, PROGRAM_NAME ": info: original name of gzipped file: %s\n", tmp_str->str);
+      /* fprintf (stderr, PROGRAM_NAME ": info: original name of gzipped file: %s\n", tmp_str->str); */
       g_string_free (tmp_str, TRUE);
     }
 
@@ -213,7 +214,7 @@ read_header (struct gzelide_state *state)
            byte != 0 && byte != EOF; 
            byte = next_chunk_byte (state))
         g_string_append_c (tmp_str, byte);
-      fprintf (stderr, PROGRAM_NAME ": info: gzip header comment: %s\n", tmp_str->str);
+      /* fprintf (stderr, PROGRAM_NAME ": info: gzip header comment: %s\n", tmp_str->str); */
       g_string_free (tmp_str, TRUE);
     }
 
@@ -222,7 +223,7 @@ read_header (struct gzelide_state *state)
       int head_crc[2];
       head_crc[0] = next_chunk_byte (state);
       head_crc[1] = next_chunk_byte (state);
-      fprintf (stderr, PROGRAM_NAME ": info: gzip head crc: %02x%02x\n", head_crc[0], head_crc[1]);
+      /* fprintf (stderr, PROGRAM_NAME ": info: gzip head crc: %02x%02x\n", head_crc[0], head_crc[1]); */
     }
 
   return TRUE;
@@ -253,7 +254,7 @@ read_data (struct gzelide_state *state)
 
       if (status == Z_DATA_ERROR)
         {
-          fprintf (stderr, PROGRAM_NAME ": info: purported gzip chunk has bad data: %s\n", state->zs->msg);
+          /* fprintf (stderr, PROGRAM_NAME ": info: purported gzip chunk has bad data: %s\n", state->zs->msg); */
           return FALSE;
         }
       else if (status == Z_NEED_DICT)
@@ -285,8 +286,10 @@ read_footer (struct gzelide_state *state)
 
   if (purported_crc != state->crc)
     {
+      /*
       fprintf (stderr, PROGRAM_NAME ": info: purported crc %lu does not match computed crc %lu\n", 
           purported_crc, state->crc);
+          */
       return FALSE;
     }
 
@@ -302,8 +305,10 @@ read_footer (struct gzelide_state *state)
 
   if (purported_uncompressed_bytes != state->zs->total_out)
     {
+      /*
       fprintf (stderr, PROGRAM_NAME ": info: purported uncompressed size %lu bytes does not match actual uncompressed size %lu bytes\n", 
           purported_uncompressed_bytes, state->zs->total_out); 
+          */
       return FALSE;
     }
 
@@ -316,6 +321,7 @@ static gboolean
 read_chunk (struct gzelide_state *state)
 {
   g_string_set_size (state->chunk_buf, 0);
+  state->chunk_offset = ftello (state->fin) - state->zs->avail_in;
 
   return read_header (state) 
     && read_data (state)
@@ -370,18 +376,35 @@ main (int    argc,
 
   init_z_stream (&state);
 
+  off_t elision_offset = -1;
   while (peek_byte (&state) != EOF)
     {
       if (read_chunk (&state))
         {
-          fprintf (stderr, PROGRAM_NAME ": info: writing good chunk of length %ld\n", state.chunk_buf->len);
-          /* fwrite (state.chunk_buf->str, 1, state.chunk_buf->len, state.fout); */
+          /*
+          fprintf (stderr, PROGRAM_NAME ": info: writing good chunk offset=%lld length=%ld\n", 
+              state.chunk_offset, state.chunk_buf->len);
+              */
+          if (elision_offset > 0)
+            {
+              fprintf (stderr, PROGRAM_NAME ": info: elided %lld bytes starting at offset %lld\n", 
+                  state.chunk_offset - elision_offset, elision_offset);
+              elision_offset = -1;
+            }
+          fwrite (state.chunk_buf->str, 1, state.chunk_buf->len, state.fout);
         }
       else
         {
-          fprintf (stderr, PROGRAM_NAME ": info: eliding bad chunk\n");
+          /* fprintf (stderr, PROGRAM_NAME ": info: eliding bad chunk\n"); */
+          elision_offset = state.chunk_offset;
           find_magic (&state);
         }
+    }
+
+  if (elision_offset > 0)
+    {
+      fprintf (stderr, PROGRAM_NAME ": info: elided %lld bytes starting at offset %lld\n", 
+          ftello (state.fin) - elision_offset, elision_offset);
     }
 
   free (state.zs);
