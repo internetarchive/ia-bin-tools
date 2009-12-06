@@ -401,7 +401,7 @@ main (int    argc,
         }
     }
 
-  if (elision_offset > 0)
+  if (elision_offset >= 0)
     {
       fprintf (stderr, PROGRAM_NAME ": info: elided %lld bytes starting at offset %lld\n", 
           (long long) (ftello (state.fin) - elision_offset), (long long) elision_offset);
