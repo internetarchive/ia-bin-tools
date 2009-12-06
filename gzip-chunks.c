@@ -51,6 +51,108 @@ typedef struct
 static size_t const BUF_SIZE = 4096; 
 static unsigned char const GZ_MAGIC[] = { 0x1f, 0x8b };
 
+static struct
+{
+  gboolean  verbose;
+  char     *output_file;
+  gboolean  invalid;
+  gboolean  split;
+  char     *split_dir;
+} 
+options = { FALSE, NULL, FALSE, FALSE, NULL };
+
+static GOptionEntry entries[] =
+{
+  { "verbose", '\0', 0, G_OPTION_ARG_NONE, &options.verbose, "report verbosely on gzip doings", NULL },
+  { "output", 'o', 0, G_OPTION_ARG_STRING, &options.output_file, "file to write (defaults to stdout)", NULL },
+  { "invalid", 'x', 0, G_OPTION_ARG_NONE, &options.split_dir, "invert the operation - write chunks of file that are NOT valid gzip chunks", NULL },
+  { "split", '\0', 0, G_OPTION_ARG_NONE, &options.split, "write each chunk to a separate file, in a randomly named directory in temp space", NULL },
+  { "split-dir", 'd', 0, G_OPTION_ARG_STRING, &options.split_dir, "write each chunk separate file in the specified directory", NULL },
+  { NULL }
+};
+
+static void
+free_state_stuff (GzipChunksState *state)
+{
+  free (state->zs);
+  g_string_free (state->out_buf, TRUE);
+  g_string_free (state->in_buf, TRUE);
+  g_string_free (state->chunk_buf, TRUE);
+}
+
+static void
+init_state (GzipChunksState   *state,
+            int               *argc,
+            char            ***argv)
+{
+  GOptionContext *context = g_option_context_new ("[FILE]");
+  GError *error = NULL;
+
+  g_option_context_add_main_entries (context, entries, NULL);
+  g_option_context_set_summary (context, "Identifies valid gzip chunks in the input and writes them verbatim to the output.");
+
+  if (!g_option_context_parse (context, argc, argv, &error))
+    {
+      fprintf (stderr, "%s: error: %s\n\n", g_get_prgname(), error->message);
+      fputs (g_option_context_get_help (context, TRUE, NULL), stderr);
+      exit (1);
+    }
+
+  if (*argc > 2)
+    {
+      fprintf (stderr, "%s: error: at most one input filename allowed\n\n", g_get_prgname ());
+      fputs (g_option_context_get_help (context, TRUE, NULL), stderr);
+      exit (2);
+    }
+
+  if (*argc == 2)
+    {
+      errno = 0;
+      state->fin = fopen ((*argv)[1], "rb");
+      if (state->fin == NULL)
+        {
+          fprintf (stderr, "%s: error: %s: %s\n", g_get_prgname (), (*argv)[1], g_strerror (errno));
+          exit (3);
+        }
+    }
+  else
+    state->fin = stdin;
+
+  if (options.output_file != NULL)
+    {
+      errno = 0;
+      state->fout = fopen (options.output_file, "wb");
+      if (state->fout == NULL) 
+        {
+          fprintf (stderr, "%s: error: %s: %s\n", g_get_prgname (), options.output_file, g_strerror (errno));
+          exit (5);
+        }
+    }
+  else
+    state->fout = stdout;
+
+  if (isatty (fileno (state->fin)))
+    {
+      fprintf (stderr, "%s: error: refusing to read binary data from a tty\n", g_get_prgname ());
+      exit (6);
+    }
+  if (isatty (fileno (state->fout)))
+    {
+      fprintf (stderr, "%s: error: refusing to write binary data to a tty\n", g_get_prgname ());
+      exit (7);
+    }
+
+  g_option_context_free (context);
+
+  /* all the GString stuff wants a terminating null character, so it even adds
+   * space in g_string_sized_new(), thus the BUF_SIZE-1 */
+  state->in_buf = g_string_sized_new (BUF_SIZE - 1);
+  state->out_buf = g_string_sized_new (BUF_SIZE - 1);
+  state->chunk_buf = g_string_new ("");
+
+  state->zs = NULL;
+}
+
 static void *
 xmalloc (size_t size)
 {
@@ -164,21 +266,24 @@ read_header (GzipChunksState *state)
   for (i = 0; i < sizeof (GZ_MAGIC); i++)
     if (next_chunk_byte (state) != GZ_MAGIC[i])
       {
-        /* fprintf (stderr, "%s: info: purported gzip chunk doesn't start with gzip magic header\n", g_get_prgname ()); */
+        if (options.verbose)
+          fprintf (stderr, "%s: info: purported gzip chunk doesn't start with gzip magic header\n", g_get_prgname ());
         return FALSE;
       }
 
   int byte = next_chunk_byte (state);
   if (byte != Z_DEFLATED)
     {
-      /* fprintf (stderr, "%s: info: purported gzip chunk has method != Z_DEFLATED\n", g_get_prgname ()); */
+      if (options.verbose)
+        fprintf (stderr, "%s: info: purported gzip chunk has method != Z_DEFLATED\n", g_get_prgname ());
       return FALSE;
     }
 
   int flags = next_chunk_byte (state);
   if ((flags & RESERVED) != 0)
     {
-      /* fprintf (stderr, "%s: info: purported gzip chunk has reserved bits set\n", g_get_prgname ()); */
+      if (options.verbose)
+        fprintf (stderr, "%s: info: purported gzip chunk has reserved bits set\n", g_get_prgname ());
       return FALSE;
     }
   
@@ -188,7 +293,8 @@ read_header (GzipChunksState *state)
 
   if ((flags & EXTRA_FIELD) != 0)  
     { 
-      /* fprintf (stderr, "%s: info: flags byte indicates there is an extra field\n", g_get_prgname ()); */
+      if (options.verbose)
+        fprintf (stderr, "%s: info: flags byte indicates there is an extra field\n", g_get_prgname ());
 
       unsigned len = (unsigned) next_chunk_byte (state);
       len += ((unsigned) next_chunk_byte (state)) << 8;
@@ -204,7 +310,8 @@ read_header (GzipChunksState *state)
            byte != 0 && byte != EOF; 
            byte = next_chunk_byte (state))
         g_string_append_c (tmp_str, byte);
-      /* fprintf (stderr, "%s: info: original name of gzipped file: %s\n", g_get_prgname (), tmp_str->str); */
+      if (options.verbose)
+        fprintf (stderr, "%s: info: original name of gzipped file: %s\n", g_get_prgname (), tmp_str->str);
       g_string_free (tmp_str, TRUE);
     }
 
@@ -215,7 +322,8 @@ read_header (GzipChunksState *state)
            byte != 0 && byte != EOF; 
            byte = next_chunk_byte (state))
         g_string_append_c (tmp_str, byte);
-      /* fprintf (stderr, "%s: info: gzip header comment: %s\n", g_get_prgname (), tmp_str->str); */
+      if (options.verbose)
+        fprintf (stderr, "%s: info: gzip header comment: %s\n", g_get_prgname (), tmp_str->str);
       g_string_free (tmp_str, TRUE);
     }
 
@@ -224,7 +332,8 @@ read_header (GzipChunksState *state)
       int head_crc[2];
       head_crc[0] = next_chunk_byte (state);
       head_crc[1] = next_chunk_byte (state);
-      /* fprintf (stderr, "%s: info: gzip head crc: %02x%02x\n", g_get_prgname (), head_crc[0], head_crc[1]); */
+      if (options.verbose)
+        fprintf (stderr, "%s: info: gzip head crc: %02x%02x\n", g_get_prgname (), head_crc[0], head_crc[1]);
     }
 
   return TRUE;
@@ -255,7 +364,8 @@ read_data (GzipChunksState *state)
 
       if (status == Z_DATA_ERROR)
         {
-          /* fprintf (stderr, "%s: info: purported gzip chunk has bad data: %s\n", g_get_prgname (), state->zs->msg); */
+          if (options.verbose)
+            fprintf (stderr, "%s: info: purported gzip chunk has bad data: %s\n", g_get_prgname (), state->zs->msg);
           return FALSE;
         }
       else if (status == Z_NEED_DICT)
@@ -287,10 +397,9 @@ read_footer (GzipChunksState *state)
 
   if (purported_crc != state->crc)
     {
-      /*
-      fprintf (stderr, "%s: info: purported crc %lu does not match computed crc %lu\n", g_get_prgname (), 
-          purported_crc, state->crc);
-          */
+      if (options.verbose)
+        fprintf (stderr, "%s: info: purported crc %lu does not match computed crc %lu\n", g_get_prgname (), 
+            purported_crc, state->crc);
       return FALSE;
     }
 
@@ -299,17 +408,17 @@ read_footer (GzipChunksState *state)
   purported_uncompressed_bytes += ((unsigned) next_chunk_byte (state)) << 16;
   if (peek_byte (state) == EOF)
     {
-      /* fprintf (stderr, "%s: info: purported gzip chunk ends in middle of 8 byte footer\n", g_get_prgname ()); */
+      if (options.verbose)
+        fprintf (stderr, "%s: info: purported gzip chunk ends in middle of 8 byte footer\n", g_get_prgname ());
       return FALSE;
     }
   purported_uncompressed_bytes += ((unsigned) next_chunk_byte (state)) << 24;
 
   if (purported_uncompressed_bytes != state->zs->total_out)
     {
-      /*
-      fprintf (stderr, "%s: info: purported uncompressed size %lu bytes does not match actual uncompressed size %lu bytes\n", g_get_prgname (), 
-          purported_uncompressed_bytes, state->zs->total_out); 
-          */
+      if (options.verbose)
+        fprintf (stderr, "%s: info: purported uncompressed size %lu bytes does not match actual uncompressed size %lu bytes\n", g_get_prgname (), 
+            purported_uncompressed_bytes, state->zs->total_out); 
       return FALSE;
     }
 
@@ -359,113 +468,6 @@ find_magic (GzipChunksState *state)
     }
 }
 
-static struct
-{
-  gboolean  verbose;
-  char     *output_file;
-  gboolean  invalid;
-  gboolean  split;
-  char     *split_dir;
-} 
-options = { FALSE, NULL, FALSE, FALSE, NULL };
-
-static GOptionEntry entries[] =
-{
-  { "verbose", '\0', 0, G_OPTION_ARG_NONE, &options.verbose, "report verbosely on gzip doings", NULL },
-  { "output", 'o', 0, G_OPTION_ARG_STRING, &options.output_file, "file to write (defaults to stdout)", NULL },
-  { "invalid", 'x', 0, G_OPTION_ARG_NONE, &options.split_dir, "invert the operation - write chunks of file that are NOT valid gzip chunks", NULL },
-  { "split", '\0', 0, G_OPTION_ARG_NONE, &options.split, "write each chunk to a separate file, in a randomly named directory in temp space", NULL },
-  { "split-dir", 'd', 0, G_OPTION_ARG_STRING, &options.split_dir, "write each chunk separate file in the specified directory", NULL },
-  { NULL }
-};
-
-static void
-init_state (GzipChunksState   *state,
-            int               *argc,
-            char            ***argv)
-{
-  GOptionContext *context = g_option_context_new ("[FILE]");
-  GError *error = NULL;
-
-  g_option_context_add_main_entries (context, entries, NULL);
-  g_option_context_set_summary (context, "Identifies valid gzip chunks in the input and writes them verbatim to the output.");
-
-  if (!g_option_context_parse (context, argc, argv, &error))
-    {
-      fprintf (stderr, "%s: %s\n\n", g_get_prgname(), error->message);
-      fputs (g_option_context_get_help (context, TRUE, NULL), stderr);
-      exit (1);
-    }
-
-  if (*argc > 2)
-    {
-      fprintf (stderr, "%s: error: at most one input filename allowed\n\n", g_get_prgname ());
-      fputs (g_option_context_get_help (context, TRUE, NULL), stderr);
-      exit (2);
-    }
-
-  if (*argc == 2)
-    {
-      errno = 0;
-      state->fin = fopen ((*argv)[1], "rb");
-      if (state->fin == NULL)
-        {
-          fprintf (stderr, "%s: error: %s: %s\n", g_get_prgname (), (*argv)[1], g_strerror (errno));
-          exit (3);
-        }
-    }
-  else
-    state->fin = stdin;
-
-  if (options.output_file != NULL)
-    {
-      /*
-      errno = 0;
-      struct stat buf;
-      if (g_stat (options.output_file, &buf) == 0)
-        {
-          fprintf (stderr, "%s: error: %s: refusing to overwrite existing file\n", g_get_prgname (), options.output_file);
-          exit (4);
-        }
-      else if (errno != ENOENT)
-        {
-          fprintf (stderr, "%s: error: %s: %s\n", g_get_prgname (), options.output_file, g_strerror (errno));
-          exit (5);
-        }
-      */
-      errno = 0;
-      state->fout = fopen (options.output_file, "wb");
-      if (state->fout == NULL) 
-        {
-          fprintf (stderr, "%s: error: %s: %s\n", g_get_prgname (), options.output_file, g_strerror (errno));
-          exit (5);
-        }
-    }
-  else
-    state->fout = stdout;
-
-  if (isatty (fileno (state->fin)))
-    {
-      fprintf (stderr, "%s: error: refusing to read binary data from a tty\n", g_get_prgname ());
-      exit (6);
-    }
-  if (isatty (fileno (state->fout)))
-    {
-      fprintf (stderr, "%s: error: refusing to write binary data to a tty\n", g_get_prgname ());
-      exit (7);
-    }
-
-  g_option_context_free (context);
-
-  /* all the GString stuff wants a terminating null character, so it even adds
-   * space in g_string_sized_new(), thus the BUF_SIZE-1 */
-  state->in_buf = g_string_sized_new (BUF_SIZE - 1);
-  state->out_buf = g_string_sized_new (BUF_SIZE - 1);
-  state->chunk_buf = g_string_new ("");
-
-  state->zs = NULL;
-}
-
 int
 main (int    argc,
       char **argv)
@@ -484,34 +486,32 @@ main (int    argc,
         {
           if (elision_offset > 0)
             {
-              fprintf (stderr, "%s: info: elided %lld bytes starting at offset %lld\n", g_get_prgname (), 
-                  (long long) (state.chunk_offset - elision_offset), (long long) elision_offset);
+              if (options.verbose)
+                fprintf (stderr, "%s: info: elided %lld bytes starting at offset %lld\n", g_get_prgname (), 
+                    (long long) (state.chunk_offset - elision_offset), (long long) elision_offset);
               elision_offset = -1;
             }
-          /*
-          fprintf (stderr, "%s: info: writing good chunk offset=%lld length=%ld\n", g_get_prgname (), 
-              state.chunk_offset, state.chunk_buf->len);
-              */
+          if (options.verbose)
+            fprintf (stderr, "%s: info: writing good chunk offset=%lld length=%ld\n", g_get_prgname (), 
+                state.chunk_offset, state.chunk_buf->len);
           fwrite (state.chunk_buf->str, 1, state.chunk_buf->len, state.fout);
         }
       else
         {
-          /* fprintf (stderr, "%s: info: eliding bad chunk\n", g_get_prgname ()); */
+          if (options.verbose)
+            fprintf (stderr, "%s: info: eliding bad chunk\n", g_get_prgname ());
           elision_offset = state.chunk_offset;
           find_magic (&state);
         }
     }
 
-  if (elision_offset >= 0)
+  if (options.verbose && elision_offset >= 0)
     {
       fprintf (stderr, "%s: info: elided %lld bytes starting at offset %lld\n", g_get_prgname (), 
           (long long) (ftello (state.fin) - elision_offset), (long long) elision_offset);
     }
 
-  free (state.zs);
-  g_string_free (state.out_buf, TRUE);
-  g_string_free (state.in_buf, TRUE);
-  g_string_free (state.chunk_buf, TRUE);
+  free_state_stuff (&state);
 
   return 0;
 }
