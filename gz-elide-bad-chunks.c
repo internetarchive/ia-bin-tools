@@ -358,11 +358,56 @@ find_magic (struct gzelide_state *state)
     }
 }
 
+static struct
+{
+  gboolean  verbose;
+  char     *output_file;
+  gboolean  invalid;
+  gboolean  split;
+  char     *split_dir;
+} 
+options = { FALSE, NULL, FALSE, FALSE, NULL };
+
+static GOptionEntry entries[] =
+{
+  { "verbose", 'v', 0, G_OPTION_ARG_NONE, &options.verbose, "report verbosely on gzip doings", NULL },
+  { "output", 'o', 0, G_OPTION_ARG_STRING, &options.output_file, "file to write (defaults to stdout)", NULL },
+  { "invalid", 'x', 0, G_OPTION_ARG_NONE, &options.split_dir, "invert the operation - write chunks of file that are NOT valid gzip chunks", NULL },
+  { "split", '\0', 0, G_OPTION_ARG_NONE, &options.split, "write each chunk to a separate file, in a randomly named directory in temp space", NULL },
+  { "split-dir", 'd', 0, G_OPTION_ARG_STRING, &options.split_dir, "write each chunk separate file in the specified directory", NULL },
+  { NULL }
+};
+
 int
 main (int    argc,
       char **argv)
 {
   setlocale (LC_ALL, "");
+
+  GOptionContext *context = g_option_context_new ("[FILE]");
+  GError *error = NULL;
+
+  g_option_context_add_main_entries (context, entries, NULL);
+  g_option_context_set_summary (context, "Identifies valid gzip chunks in the input and writes them verbatim to the output.");
+
+  if (!g_option_context_parse (context, &argc, &argv, &error))
+    {
+      fprintf (stderr, "%s: %s\n\n", g_get_prgname(), error->message);
+      fputs (g_option_context_get_help (context, TRUE, NULL), stderr);
+      exit (1);
+    }
+
+  g_option_context_free (context);
+
+  /* if (argc  */
+  /*
+  if (*argc > )
+    {
+      g_printerr ("bin-search: error: You must specify a search string and at least one file to search\n\n");
+      g_printerr ("%s", g_option_context_get_help (context, TRUE, NULL));
+      exit (2);
+    }
+    */
 
   struct gzelide_state state;
   state.fin = stdin;
