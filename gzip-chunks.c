@@ -38,6 +38,7 @@ typedef struct
   GString       *chunk_buf;
   off_t          chunk_offset;
   unsigned long  crc;
+  char          *split_dir;
 } GzipChunksState;
 
 /* gzip flag byte */
@@ -159,6 +160,7 @@ init_state (GzipChunksState   *state,
       exit (1);
     }
 
+  /* "--split --split-dir=foo" is the same as "--split-dir=foo */
   if (*argc == 2)
     {
       errno = 0;
@@ -169,19 +171,51 @@ init_state (GzipChunksState   *state,
   else
     state->fin = stdin;
 
+  if (options.split_dir)
+    {
+      state->split_dir = options.split_dir;
+
+      /* XXX if this fails let error message come up later */
+      mkdir (state->split_dir, 0755);
+    }
+  else if (options.split)
+    {
+      GString *template = g_string_new ("");
+      char *short_filename;
+      if (state->fin == stdin)
+        short_filename = g_strdup ("stdin");
+      else
+        short_filename = g_path_get_basename ((*argv)[1]);
+
+      g_string_printf (template, "%s/gzip-chunks-%s-XXXXXX", g_get_tmp_dir (), short_filename);
+
+      errno = 0;
+      state->split_dir = mkdtemp (template->str);
+      if (state->split_dir == NULL)
+        die ("mkdtemp: unable to create temp dir: %s", g_strerror (errno));
+    }
+  if (state->split_dir)
+    state->fout = NULL;
+
+  if (options.output_file && options.split)
+    die ("--output and --split cannot be used together");
+  else if (options.output_file && options.split_dir)
+    die ("--output and --split-dir cannot be used together");
+
   if (options.output_file != NULL)
     {
+
       errno = 0;
       state->fout = fopen (options.output_file, "wb");
       if (state->fout == NULL) 
         die ("%s: %s", options.output_file, g_strerror (errno));
     }
-  else
+  else if (state->split_dir == NULL)
     state->fout = stdout;
 
   if (isatty (fileno (state->fin)))
     die ("refusing to read binary data from a tty");
-  if (isatty (fileno (state->fout)))
+  if (state->fout != NULL && isatty (fileno (state->fout)))
     die ("refusing to write binary data to a tty");
 
   g_option_context_free (context);
@@ -204,7 +238,7 @@ init_state (GzipChunksState   *state,
   state->zs->zfree = NULL;
   state->zs->opaque = NULL;
 
-  /* Comment from copied gz_open(): "windowBits is passed < 0 to tell that
+  /* Comment from zlib gzio.c gz_open(): "windowBits is passed < 0 to tell that
    * there is no zlib header.  Note that in this case inflate *requires* an
    * extra "dummy" byte after the compressed stream in order to complete
    * decompression and return Z_STREAM_END. Here the gzip CRC32 ensures that 4
@@ -475,7 +509,29 @@ main (int    argc,
             }
           info ("writing good chunk offset=%lld length=%ld", 
                 state.chunk_offset, state.chunk_buf->len);
-          fwrite (state.chunk_buf->str, 1, state.chunk_buf->len, state.fout);
+
+          FILE *fout = state.fout;
+          if (state.split_dir)
+            {
+              GString *filename = g_string_new ("");
+              g_string_printf (filename, "%s/good-chunk-offset-%lld.gz", state.split_dir, state.chunk_offset);
+
+              errno = 0;
+              fout = fopen (filename->str, "wb");
+              if (fout == NULL) 
+                die ("%s: %s", filename->str, g_strerror (errno));
+
+              info ("writing %s", filename->str);
+
+              g_string_free (filename, TRUE);
+            }
+
+          size_t bytes_written = fwrite (state.chunk_buf->str, 1, state.chunk_buf->len, fout);
+          if (bytes_written != state.chunk_buf->len)
+            die ("problem writing: wrote %d bytes (expected %d)", bytes_written, state.chunk_buf->len);
+
+          if (state.split_dir)
+            fclose (fout);
         }
       else
         {
