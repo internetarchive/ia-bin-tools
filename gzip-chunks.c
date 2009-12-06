@@ -71,6 +71,33 @@ static GOptionEntry entries[] =
   { NULL }
 };
 
+static void *
+xmalloc (size_t size)
+{
+  void *ptr = malloc (size);
+  if (ptr == NULL)
+    {
+      fprintf (stderr, "%s: error: virtual memory exhausted\n", g_get_prgname ());
+      exit (2);
+    }
+  return ptr;
+}
+
+static size_t 
+xfread (FILE   *fin, 
+        void   *buf, 
+        size_t  nbytes)
+{
+  errno = 0;
+  size_t bytes_read = fread (buf, 1, nbytes, fin);
+  if (ferror (fin))
+    {
+      fprintf (stderr, "%s: error: fread: %s\n", g_get_prgname (), g_strerror (errno));
+      exit (3);
+    }
+  return bytes_read;
+}
+
 static void
 free_state_stuff (GzipChunksState *state)
 {
@@ -78,6 +105,24 @@ free_state_stuff (GzipChunksState *state)
   g_string_free (state->out_buf, TRUE);
   g_string_free (state->in_buf, TRUE);
   g_string_free (state->chunk_buf, TRUE);
+}
+
+static void
+info (char const *format,
+      ...)
+{
+
+  if (options.verbose)
+    {
+      fprintf (stderr, "%s: info: ", g_get_prgname ());
+
+      va_list args;
+      va_start (args, format);
+      vfprintf (stderr, format, args);
+      va_end (args);
+
+      fputc ('\n', stderr);
+    }
 }
 
 static void
@@ -150,61 +195,6 @@ init_state (GzipChunksState   *state,
   state->out_buf = g_string_sized_new (BUF_SIZE - 1);
   state->chunk_buf = g_string_new ("");
 
-  state->zs = NULL;
-}
-
-static void *
-xmalloc (size_t size)
-{
-  void *ptr = malloc (size);
-  if (ptr == NULL)
-    {
-      fprintf (stderr, "%s: error: virtual memory exhausted\n", g_get_prgname ());
-      exit (2);
-    }
-  return ptr;
-}
-
-static size_t 
-xfread (FILE   *fin, 
-        void   *buf, 
-        size_t  nbytes)
-{
-  errno = 0;
-  size_t bytes_read = fread (buf, 1, nbytes, fin);
-  if (ferror (fin))
-    {
-      fprintf (stderr, "%s: error: fread: %s\n", g_get_prgname (), g_strerror (errno));
-      exit (3);
-    }
-  return bytes_read;
-}
-
-/* 1. if there's no space in the buffer, resets it
- * 2. tries to fill buffer */
-static void
-refresh_in_buf (FILE     *fin, 
-                z_stream *zs,
-                GString  *in_buf)
-{
-  int unused_bytes = in_buf->str + in_buf->allocated_len - ((char *) zs->next_in + zs->avail_in);
-  if (unused_bytes == 0)
-    {
-      memmove (in_buf->str, zs->next_in, zs->avail_in);
-      zs->next_in = (Bytef *) in_buf->str;
-    }
-
-  unused_bytes = in_buf->str + in_buf->allocated_len - ((char *) zs->next_in + zs->avail_in);
-  g_assert (unused_bytes > 0);
-
-  size_t bytes_read = xfread (fin, zs->next_in + zs->avail_in, unused_bytes);
-  zs->avail_in += bytes_read;
-}
-
-/* return value must be freed */
-static void
-init_z_stream (GzipChunksState *state)
-{
   state->zs = xmalloc (sizeof (z_stream));
 
   state->zs->next_in = (Bytef *) state->in_buf->str;
@@ -228,6 +218,27 @@ init_z_stream (GzipChunksState *state)
       fprintf (stderr, "%s: error: inflateInit2: %s\n", g_get_prgname (), state->zs->msg);
       exit (1);
     }
+}
+
+/* 1. if there's no space in the buffer, resets it
+ * 2. tries to fill buffer */
+static void
+refresh_in_buf (FILE     *fin, 
+                z_stream *zs,
+                GString  *in_buf)
+{
+  int unused_bytes = in_buf->str + in_buf->allocated_len - ((char *) zs->next_in + zs->avail_in);
+  if (unused_bytes == 0)
+    {
+      memmove (in_buf->str, zs->next_in, zs->avail_in);
+      zs->next_in = (Bytef *) in_buf->str;
+    }
+
+  unused_bytes = in_buf->str + in_buf->allocated_len - ((char *) zs->next_in + zs->avail_in);
+  g_assert (unused_bytes > 0);
+
+  size_t bytes_read = xfread (fin, zs->next_in + zs->avail_in, unused_bytes);
+  zs->avail_in += bytes_read;
 }
 
 /* returns EOF on eof */
@@ -266,24 +277,21 @@ read_header (GzipChunksState *state)
   for (i = 0; i < sizeof (GZ_MAGIC); i++)
     if (next_chunk_byte (state) != GZ_MAGIC[i])
       {
-        if (options.verbose)
-          fprintf (stderr, "%s: info: purported gzip chunk doesn't start with gzip magic header\n", g_get_prgname ());
+        info ("purported gzip chunk doesn't start with gzip magic header");
         return FALSE;
       }
 
   int byte = next_chunk_byte (state);
   if (byte != Z_DEFLATED)
     {
-      if (options.verbose)
-        fprintf (stderr, "%s: info: purported gzip chunk has method != Z_DEFLATED\n", g_get_prgname ());
+      info ("purported gzip chunk has method != Z_DEFLATED");
       return FALSE;
     }
 
   int flags = next_chunk_byte (state);
   if ((flags & RESERVED) != 0)
     {
-      if (options.verbose)
-        fprintf (stderr, "%s: info: purported gzip chunk has reserved bits set\n", g_get_prgname ());
+      info ("purported gzip chunk has reserved bits set");
       return FALSE;
     }
   
@@ -293,8 +301,7 @@ read_header (GzipChunksState *state)
 
   if ((flags & EXTRA_FIELD) != 0)  
     { 
-      if (options.verbose)
-        fprintf (stderr, "%s: info: flags byte indicates there is an extra field\n", g_get_prgname ());
+      info ("flags byte indicates there is an extra field");
 
       unsigned len = (unsigned) next_chunk_byte (state);
       len += ((unsigned) next_chunk_byte (state)) << 8;
@@ -310,8 +317,7 @@ read_header (GzipChunksState *state)
            byte != 0 && byte != EOF; 
            byte = next_chunk_byte (state))
         g_string_append_c (tmp_str, byte);
-      if (options.verbose)
-        fprintf (stderr, "%s: info: original name of gzipped file: %s\n", g_get_prgname (), tmp_str->str);
+      info ("original name of gzipped file: %s", tmp_str->str);
       g_string_free (tmp_str, TRUE);
     }
 
@@ -322,8 +328,7 @@ read_header (GzipChunksState *state)
            byte != 0 && byte != EOF; 
            byte = next_chunk_byte (state))
         g_string_append_c (tmp_str, byte);
-      if (options.verbose)
-        fprintf (stderr, "%s: info: gzip header comment: %s\n", g_get_prgname (), tmp_str->str);
+      info ("gzip header comment: %s", tmp_str->str);
       g_string_free (tmp_str, TRUE);
     }
 
@@ -332,8 +337,7 @@ read_header (GzipChunksState *state)
       int head_crc[2];
       head_crc[0] = next_chunk_byte (state);
       head_crc[1] = next_chunk_byte (state);
-      if (options.verbose)
-        fprintf (stderr, "%s: info: gzip head crc: %02x%02x\n", g_get_prgname (), head_crc[0], head_crc[1]);
+      info ("gzip head crc: %02x%02x", head_crc[0], head_crc[1]);
     }
 
   return TRUE;
@@ -344,7 +348,7 @@ read_data (GzipChunksState *state)
 {
   if (inflateReset (state->zs) != Z_OK) 
     {
-      fprintf (stderr, "%s: error: inflateReset failed: probably indicates a bug in this program\n", g_get_prgname ());
+      fprintf (stderr, "%s: error: inflateReset failed: probably indicates a bug in %s\n", g_get_prgname (), g_get_prgname ());
       exit (6);
     }
 
@@ -364,8 +368,7 @@ read_data (GzipChunksState *state)
 
       if (status == Z_DATA_ERROR)
         {
-          if (options.verbose)
-            fprintf (stderr, "%s: info: purported gzip chunk has bad data: %s\n", g_get_prgname (), state->zs->msg);
+          info ("purported gzip chunk has bad data: %s", state->zs->msg);
           return FALSE;
         }
       else if (status == Z_NEED_DICT)
@@ -375,7 +378,8 @@ read_data (GzipChunksState *state)
         }
       else if (status != Z_OK && status != Z_STREAM_END)
         {
-          fprintf (stderr, "%s: error: inflate returned unexpected status %d: probably indicates a bug in this program\n", g_get_prgname (), status);
+          fprintf (stderr, "%s: error: inflate returned unexpected status %d: probably indicates a bug in %s\n", 
+              g_get_prgname (), status, g_get_prgname ());
           exit (6);
         }
 
@@ -397,9 +401,7 @@ read_footer (GzipChunksState *state)
 
   if (purported_crc != state->crc)
     {
-      if (options.verbose)
-        fprintf (stderr, "%s: info: purported crc %lu does not match computed crc %lu\n", g_get_prgname (), 
-            purported_crc, state->crc);
+      info ("purported crc %lu does not match computed crc %lu", purported_crc, state->crc);
       return FALSE;
     }
 
@@ -408,16 +410,14 @@ read_footer (GzipChunksState *state)
   purported_uncompressed_bytes += ((unsigned) next_chunk_byte (state)) << 16;
   if (peek_byte (state) == EOF)
     {
-      if (options.verbose)
-        fprintf (stderr, "%s: info: purported gzip chunk ends in middle of 8 byte footer\n", g_get_prgname ());
+      info ("purported gzip chunk ends in middle of 8 byte footer");
       return FALSE;
     }
   purported_uncompressed_bytes += ((unsigned) next_chunk_byte (state)) << 24;
 
   if (purported_uncompressed_bytes != state->zs->total_out)
     {
-      if (options.verbose)
-        fprintf (stderr, "%s: info: purported uncompressed size %lu bytes does not match actual uncompressed size %lu bytes\n", g_get_prgname (), 
+      info ("purported uncompressed size %lu bytes does not match actual uncompressed size %lu bytes", 
             purported_uncompressed_bytes, state->zs->total_out); 
       return FALSE;
     }
@@ -477,7 +477,6 @@ main (int    argc,
   GzipChunksState state;
 
   init_state (&state, &argc, &argv);
-  init_z_stream (&state);
 
   off_t elision_offset = -1;
   while (peek_byte (&state) != EOF)
@@ -486,30 +485,24 @@ main (int    argc,
         {
           if (elision_offset > 0)
             {
-              if (options.verbose)
-                fprintf (stderr, "%s: info: elided %lld bytes starting at offset %lld\n", g_get_prgname (), 
+              info ("elided %lld bytes starting at offset %lld", 
                     (long long) (state.chunk_offset - elision_offset), (long long) elision_offset);
               elision_offset = -1;
             }
-          if (options.verbose)
-            fprintf (stderr, "%s: info: writing good chunk offset=%lld length=%ld\n", g_get_prgname (), 
+          info ("writing good chunk offset=%lld length=%ld", 
                 state.chunk_offset, state.chunk_buf->len);
           fwrite (state.chunk_buf->str, 1, state.chunk_buf->len, state.fout);
         }
       else
         {
-          if (options.verbose)
-            fprintf (stderr, "%s: info: eliding bad chunk\n", g_get_prgname ());
+          info ("eliding bad chunk");
           elision_offset = state.chunk_offset;
           find_magic (&state);
         }
     }
 
-  if (options.verbose && elision_offset >= 0)
-    {
-      fprintf (stderr, "%s: info: elided %lld bytes starting at offset %lld\n", g_get_prgname (), 
-          (long long) (ftello (state.fin) - elision_offset), (long long) elision_offset);
-    }
+  if (elision_offset >= 0) info ("elided %lld bytes starting at offset %lld",
+        (long long) (ftello (state.fin) - elision_offset), (long long) elision_offset);
 
   free_state_stuff (&state);
 
