@@ -71,13 +71,46 @@ static GOptionEntry entries[] =
   { NULL }
 };
 
+static void
+info (char const *format,
+      ...)
+{
+  if (options.verbose)
+    {
+      fprintf (stderr, "%s: info: ", g_get_prgname ());
+
+      va_list args;
+      va_start (args, format);
+      vfprintf (stderr, format, args);
+      va_end (args);
+
+      fputc ('\n', stderr);
+    }
+}
+
+static void
+die (char const *format,
+     ...)
+{
+  fprintf (stderr, "%s: error: ", g_get_prgname ());
+
+  va_list args;
+  va_start (args, format);
+  vfprintf (stderr, format, args);
+  va_end (args);
+
+  fputc ('\n', stderr);
+
+  exit (1);
+}
+
 static void *
 xmalloc (size_t size)
 {
   void *ptr = malloc (size);
   if (ptr == NULL)
     {
-      fprintf (stderr, "%s: error: virtual memory exhausted\n", g_get_prgname ());
+      die ("virtual memory exhausted");
       exit (2);
     }
   return ptr;
@@ -92,7 +125,7 @@ xfread (FILE   *fin,
   size_t bytes_read = fread (buf, 1, nbytes, fin);
   if (ferror (fin))
     {
-      fprintf (stderr, "%s: error: fread: %s\n", g_get_prgname (), g_strerror (errno));
+      die ("fread: %s", g_strerror (errno));
       exit (3);
     }
   return bytes_read;
@@ -108,24 +141,6 @@ free_state_stuff (GzipChunksState *state)
 }
 
 static void
-info (char const *format,
-      ...)
-{
-
-  if (options.verbose)
-    {
-      fprintf (stderr, "%s: info: ", g_get_prgname ());
-
-      va_list args;
-      va_start (args, format);
-      vfprintf (stderr, format, args);
-      va_end (args);
-
-      fputc ('\n', stderr);
-    }
-}
-
-static void
 init_state (GzipChunksState   *state,
             int               *argc,
             char            ***argv)
@@ -138,7 +153,7 @@ init_state (GzipChunksState   *state,
 
   if (!g_option_context_parse (context, argc, argv, &error))
     {
-      fprintf (stderr, "%s: error: %s\n\n", g_get_prgname(), error->message);
+      fprintf (stderr, "%s: %s\n\n", g_get_prgname(), error->message);
       fputs (g_option_context_get_help (context, TRUE, NULL), stderr);
       exit (1);
     }
@@ -155,10 +170,7 @@ init_state (GzipChunksState   *state,
       errno = 0;
       state->fin = fopen ((*argv)[1], "rb");
       if (state->fin == NULL)
-        {
-          fprintf (stderr, "%s: error: %s: %s\n", g_get_prgname (), (*argv)[1], g_strerror (errno));
-          exit (3);
-        }
+        die ("%s: %s", (*argv)[1], g_strerror (errno));
     }
   else
     state->fin = stdin;
@@ -168,24 +180,15 @@ init_state (GzipChunksState   *state,
       errno = 0;
       state->fout = fopen (options.output_file, "wb");
       if (state->fout == NULL) 
-        {
-          fprintf (stderr, "%s: error: %s: %s\n", g_get_prgname (), options.output_file, g_strerror (errno));
-          exit (5);
-        }
+        die ("%s: %s", options.output_file, g_strerror (errno));
     }
   else
     state->fout = stdout;
 
   if (isatty (fileno (state->fin)))
-    {
-      fprintf (stderr, "%s: error: refusing to read binary data from a tty\n", g_get_prgname ());
-      exit (6);
-    }
+    die ("refusing to read binary data from a tty");
   if (isatty (fileno (state->fout)))
-    {
-      fprintf (stderr, "%s: error: refusing to write binary data to a tty\n", g_get_prgname ());
-      exit (7);
-    }
+    die ("refusing to write binary data to a tty");
 
   g_option_context_free (context);
 
@@ -214,10 +217,7 @@ init_state (GzipChunksState   *state,
    * bytes are present after the compressed stream." */
   int status = inflateInit2 (state->zs, -MAX_WBITS);
   if (status != Z_OK)
-    {
-      fprintf (stderr, "%s: error: inflateInit2: %s\n", g_get_prgname (), state->zs->msg);
-      exit (1);
-    }
+    die ("inflateInit2: %s", state->zs->msg);
 }
 
 /* 1. if there's no space in the buffer, resets it
@@ -347,10 +347,7 @@ static gboolean
 read_data (GzipChunksState *state)
 {
   if (inflateReset (state->zs) != Z_OK) 
-    {
-      fprintf (stderr, "%s: error: inflateReset failed: probably indicates a bug in %s\n", g_get_prgname (), g_get_prgname ());
-      exit (6);
-    }
+    die ("inflateReset failed: probably indicates a bug in %s", g_get_prgname ());
 
   state->crc = crc32 (0l, NULL, 0);
 
@@ -372,16 +369,10 @@ read_data (GzipChunksState *state)
           return FALSE;
         }
       else if (status == Z_NEED_DICT)
-        {
-          fprintf (stderr, "%s: error: inflate returned Z_NEED_DICT: contingency unimplemented\n", g_get_prgname ());
-          exit (5);
-        }
+        die ("inflate returned Z_NEED_DICT: contingency unimplemented");
       else if (status != Z_OK && status != Z_STREAM_END)
-        {
-          fprintf (stderr, "%s: error: inflate returned unexpected status %d: probably indicates a bug in %s\n", 
-              g_get_prgname (), status, g_get_prgname ());
-          exit (6);
-        }
+        die ("inflate returned unexpected status %d: probably indicates a bug in %s", 
+            status, g_get_prgname ());
 
       g_string_append_len (state->chunk_buf, (char *) next_in_before, state->zs->next_in - next_in_before);  
 
@@ -424,7 +415,6 @@ read_footer (GzipChunksState *state)
 
   return TRUE;
 }
-
 
 /* returns true if it reads a valid gzip chunk, false if not */
 static gboolean
