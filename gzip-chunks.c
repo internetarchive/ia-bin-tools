@@ -73,6 +73,7 @@ static GOptionEntry entries[] =
 };
 
 static void
+G_GNUC_PRINTF (1, 2)
 info (char const *format,
       ...)
 {
@@ -501,20 +502,20 @@ main (int    argc,
     {
       if (read_chunk (&state))
         {
-          if (elision_offset > 0)
+          if (elision_offset >= 0)
             {
               info ("elided %lld bytes starting at offset %lld", 
                     (long long) (state.chunk_offset - elision_offset), (long long) elision_offset);
               elision_offset = -1;
             }
           info ("writing good chunk offset=%lld length=%ld", 
-                state.chunk_offset, state.chunk_buf->len);
+                (long long) state.chunk_offset, state.chunk_buf->len);
 
           FILE *fout = state.fout;
           if (state.split_dir)
             {
               GString *filename = g_string_new ("");
-              g_string_printf (filename, "%s/good-chunk-offset-%lld.gz", state.split_dir, state.chunk_offset);
+              g_string_printf (filename, "%s/good-chunk-offset-%lld.gz", state.split_dir, (long long) state.chunk_offset);
 
               errno = 0;
               fout = fopen (filename->str, "wb");
