@@ -70,12 +70,12 @@ options = { FALSE, NULL, FALSE, FALSE, NULL, 0, -1 };
 static GOptionEntry entries[] =
 {
   { "verbose", '\0', 0, G_OPTION_ARG_NONE, &options.verbose, "Report verbosely on gzip doings", NULL },
-  { "output", 'o', 0, G_OPTION_ARG_STRING, &options.output_file, "Write to specified file (default is stdout)", NULL },
-  { "invalid", 'x', 0, G_OPTION_ARG_NONE, &options.invalid, "Invert the operation - write chunks that are NOT valid gzip chunks", NULL },
+  { "output", 'o', 0, G_OPTION_ARG_STRING, &options.output_file, "Write to specified file (default is stdout)", "FILE" },
+  { "invalid", 'x', 0, G_OPTION_ARG_NONE, &options.invalid, "Invert the operation: write chunks that are NOT valid gzip chunks", NULL },
   { "split", '\0', 0, G_OPTION_ARG_NONE, &options.split, "Write each chunk to a separate file, in a randomly named directory in temp space", NULL },
-  { "split-dir", 'd', 0, G_OPTION_ARG_STRING, &options.split_dir, "Write each chunk separate file in the specified directory", NULL },
-  { "start", '\0', 0, G_OPTION_ARG_INT64, &options.start_offset, "Start processing input at specified byte offset", NULL },
-  { "end", '\0', 0, G_OPTION_ARG_INT64, &options.end_offset, "Stop processing input at specified byte offset", NULL },
+  { "split-dir", 'd', 0, G_OPTION_ARG_STRING, &options.split_dir, "Write each chunk separate file in the specified directory", "PATH" },
+  { "start", '\0', 0, G_OPTION_ARG_INT64, &options.start_offset, "Start processing input at specified byte offset", "OFFSET" },
+  { "end", '\0', 0, G_OPTION_ARG_INT64, &options.end_offset, "Stop processing input at specified byte offset", "OFFSET" },
   { NULL }
 };
 
@@ -167,8 +167,8 @@ init_state (GzipChunksState   *state,
   g_option_context_set_summary (context, "Identifies valid gzip chunks in the input and writes them verbatim to the output.");
 
   g_option_context_set_description (context, 
-      "This tool elides invalid gzip chunks in the input. To put it another way, it\n"
-      "dumps valid gzip chunks to the output.\n"
+      "This tool dumps valid gzip chunks from the input. To put it another way, it\n"
+      "elides invalid data.\n"
       "\n"
       "Examples of usage:\n"
       "\n"
