@@ -1,6 +1,6 @@
-/* vim: set sw=2 et:
+/* $Id$
  *
- * $Id: whoiz.c 6657 2009-11-16 17:51:36Z nlevitt $
+ * vim: set sw=2 et:
  *
  * whoiz.c: Perform whois queries (RFC 3912).
  *

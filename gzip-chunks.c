@@ -162,6 +162,18 @@ init_state (GzipChunksState   *state,
   g_option_context_add_main_entries (context, entries, NULL);
   g_option_context_set_summary (context, "Identifies valid gzip chunks in the input and writes them verbatim to the output.");
 
+  g_option_context_set_description (context, 
+      "This tool elides invalid gzip chunks in the input. To put it another\n"
+      "way, it extracts good gzip chunks and dumps them to the output.\n"
+      "\n"
+      "Examples of usage:\n"
+      "\n"
+      "  # elide bad gzip chunks to repair a file\n"
+      "  gzip-chunks bad.warc.gz > repaired.warc.gz\n"
+      "\n"
+      "  # save invalid gzip chunks toward end of file for inspection\n"
+      "  gzip-chunks --invalid --split --start=90000000 bad.warc.gz\n");   
+
   if (!g_option_context_parse (context, argc, argv, &error))
     {
       fprintf (stderr, "%s: %s\n\n", g_get_prgname(), error->message);
