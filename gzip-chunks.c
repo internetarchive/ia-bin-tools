@@ -39,7 +39,8 @@ typedef struct
   off_t          bad_chunk_offset;
   unsigned long  crc;
   char          *split_dir;
-} GzipChunksState;
+} 
+GzipChunksState;
 
 /* gzip flag byte */
 static const int ASCII_FLAG  = 0x01; /* bit 0 set: file probably ascii text */
@@ -95,6 +96,7 @@ info (char const *format,
 }
 
 static void
+G_GNUC_PRINTF (1, 2)
 die (char const *format,
      ...)
 {
@@ -349,6 +351,7 @@ check_gzip_header (GzipChunksState *state)
 
       for (i = 0; i < len; i++)
         byte = get_byte (state);
+
       if (byte == EOF)
         {
           info ("input ends in gzip extra field");
@@ -361,6 +364,7 @@ check_gzip_header (GzipChunksState *state)
       for (byte = get_byte (state); 
           byte != 0 && byte != EOF; 
           byte = get_byte (state));
+
       if (byte == EOF)
         {
           info ("input ends in gzip extra field");
@@ -369,21 +373,23 @@ check_gzip_header (GzipChunksState *state)
     }
 
   if ((flags & COMMENT) != 0) 
-  {
+    {
       for (byte = get_byte (state); 
           byte != 0 && byte != EOF; 
-          byte = get_byte (state))
+          byte = get_byte (state));
+
       if (byte == EOF)
         {
           info ("input ends in gzip comment field");
           return FALSE;
         }
-  }
+    }
 
   if ((flags & HEAD_CRC) != 0) 
     {
       byte = get_byte (state);
       byte = get_byte (state);
+
       if (byte == EOF)
         {
           info ("input ends in gzip comment field");
@@ -530,22 +536,22 @@ maybe_write_chunk (GzipChunksState *state)
   off_t start_offset = -1;
   if (!options.invalid && state->good_chunk_offset >= 0)
     {
-      info ("writing good chunk offset=%lld length=%ld", 
-          (long long) state->good_chunk_offset, get_offset (state) - state->good_chunk_offset);
+      info ("writing good chunk offset=%lld length=%lld", 
+          (long long) state->good_chunk_offset, 
+          (long long) (get_offset (state) - state->good_chunk_offset));
       start_offset = state->good_chunk_offset;
     }
   else if (options.invalid && state->bad_chunk_offset >= 0)
     {
       info ("writing bad chunk offset=%lld length=%ld", 
-          (long long) state->bad_chunk_offset, get_offset (state) - state->bad_chunk_offset);
+          (long long) state->bad_chunk_offset, 
+          (long long) (get_offset (state) - state->bad_chunk_offset));
       start_offset = state->bad_chunk_offset;
     }
   else
     return;
 
-  off_t bytes_to_write = get_offset (state) - start_offset;
-
-  FILE *fout = state->fout;
+  FILE *fout;
   if (state->split_dir)
     {
       GString *filename = g_string_new ("");
@@ -566,6 +572,10 @@ maybe_write_chunk (GzipChunksState *state)
 
       g_string_free (filename, TRUE);
     }
+  else
+    fout = state->fout;
+
+  off_t bytes_to_write = get_offset (state) - start_offset;
 
   errno = 0;
   if (fseeko (state->fin, start_offset, SEEK_SET) != 0)
@@ -606,22 +616,20 @@ main (int    argc,
 
   while (peek_byte (&state) != EOF && 
       (options.end_offset < 0 || get_offset (&state) < options.end_offset))
-    {
-      if (read_chunk (&state))
-        {
-          /* Only now do we know the bad chunk preceding this good chunk, if
-           * any, is complete. Write out either the new good chunk or the
-           * preceding bad chunk, depending if --invalid. */
-          maybe_write_chunk (&state);
-          state.bad_chunk_offset = -1;
-          state.good_chunk_offset = -1;
-        }
-      else
-        {
-          state.good_chunk_offset = -1;
-          find_magic (&state);
-        }
-    }
+    if (read_chunk (&state))
+      {
+        /* Only now do we know the bad chunk preceding this good chunk, if
+         * any, is complete. Write out either the new good chunk or the
+         * preceding bad chunk, depending if --invalid. */
+        maybe_write_chunk (&state);
+        state.bad_chunk_offset = -1;
+        state.good_chunk_offset = -1;
+      }
+    else
+      {
+        state.good_chunk_offset = -1;
+        find_magic (&state);
+      }
   maybe_write_chunk (&state);
 
   free_state_stuff (&state);
