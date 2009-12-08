@@ -39,6 +39,8 @@ typedef struct
   off_t          bad_chunk_offset;
   unsigned long  crc;
   char          *split_dir;
+  int            dumped_chunks;
+  off_t          dumped_bytes;
 } 
 GzipChunksState;
 
@@ -155,6 +157,8 @@ init_state (GzipChunksState   *state,
   state->bad_chunk_offset = -1;
   state->crc = 0;
   state->split_dir = NULL;
+  state->dumped_chunks = 0;
+  state->dumped_bytes = 0;
 
   GOptionContext *context = g_option_context_new ("FILE");
   GError *error = NULL;
@@ -163,8 +167,8 @@ init_state (GzipChunksState   *state,
   g_option_context_set_summary (context, "Identifies valid gzip chunks in the input and writes them verbatim to the output.");
 
   g_option_context_set_description (context, 
-      "This tool elides invalid gzip chunks in the input. To put it another\n"
-      "way, it extracts good gzip chunks and dumps them to the output.\n"
+      "This tool elides invalid gzip chunks in the input. To put it another way, it\n"
+      "dumps valid gzip chunks to the output.\n"
       "\n"
       "Examples of usage:\n"
       "\n"
@@ -221,6 +225,9 @@ init_state (GzipChunksState   *state,
       state->split_dir = mkdtemp (template->str);
       if (state->split_dir == NULL)
         die ("mkdtemp: unable to create temp dir: %s", g_strerror (errno));
+
+      printf ("%s: dumping %s gzip chunks into %s (use --verbose for more info)\n", 
+          g_get_prgname (), options.invalid ? "invalid" : "valid", state->split_dir);
     }
   if (state->split_dir)
     state->fout = NULL;
@@ -593,8 +600,8 @@ maybe_write_chunk (GzipChunksState *state)
   if (fseeko (state->fin, start_offset, SEEK_SET) != 0)
     die ("fseeko: %s", g_strerror (errno));
 
-  off_t n;
-  for (n = 0; n < bytes_to_write; n++)
+  off_t bytes_written;
+  for (bytes_written = 0; bytes_written < bytes_to_write; bytes_written++)
     { 
       int byte = fgetc (state->fin);
       g_assert (byte != EOF);
@@ -611,6 +618,9 @@ maybe_write_chunk (GzipChunksState *state)
   errno = 0;
   if (fseeko (state->fin, state->zs->avail_in, SEEK_CUR) != 0)
     die ("fseeko: %s", g_strerror (errno));
+
+  state->dumped_chunks++;
+  state->dumped_bytes += bytes_written;
 }
 
 int
@@ -643,6 +653,11 @@ main (int    argc,
         find_magic (&state);
       }
   maybe_write_chunk (&state);
+
+  FILE *report_out = state.fout == stdout ? stderr : stdout;
+  fprintf (report_out, "%s: dumped %d %s gzip chunks totaling %lld bytes\n", 
+      g_get_prgname (), state.dumped_chunks, 
+      options.invalid ? "invalid" : "valid", state.dumped_bytes);
 
   free_state_stuff (&state);
 
