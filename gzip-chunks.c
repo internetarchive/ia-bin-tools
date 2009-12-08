@@ -45,14 +45,15 @@ typedef struct
 GzipChunksState;
 
 /* gzip flag byte */
-static const int ASCII_FLAG  = 0x01; /* bit 0 set: file probably ascii text */
-static const int HEAD_CRC    = 0x02; /* bit 1 set: header CRC present */
-static const int EXTRA_FIELD = 0x04; /* bit 2 set: extra field present */
-static const int ORIG_NAME   = 0x08; /* bit 3 set: original file name present */
-static const int COMMENT     = 0x10; /* bit 4 set: file comment present */
-static const int RESERVED    = 0xE0; /* bits 5..7: reserved */
+static int const ASCII_FLAG  = 0x01; /* bit 0 set: file probably ascii text */
+static int const HEAD_CRC    = 0x02; /* bit 1 set: header CRC present */
+static int const EXTRA_FIELD = 0x04; /* bit 2 set: extra field present */
+static int const ORIG_NAME   = 0x08; /* bit 3 set: original file name present */
+static int const COMMENT     = 0x10; /* bit 4 set: file comment present */
+static int const RESERVED    = 0xE0; /* bits 5..7: reserved */
 
-static size_t const BUF_SIZE = 4096; 
+static size_t const INITIAL_BUF_SIZE = 4096; 
+static size_t const MAX_BUF_SIZE = 512 * 1024;
 static unsigned char const GZ_MAGIC[] = { 0x1f, 0x8b };
 
 static struct
@@ -172,7 +173,7 @@ init_state (GzipChunksState   *state,
       "\n"
       "Examples of usage:\n"
       "\n"
-      "  # elide bad gzip chunks to repair a file\n"
+      "  # salvage good records from a bad warc.gz\n"
       "  gzip-chunks bad.warc.gz > repaired.warc.gz\n"
       "\n"
       "  # save invalid gzip chunks toward end of file for inspection\n"
@@ -253,9 +254,9 @@ init_state (GzipChunksState   *state,
   g_option_context_free (context);
 
   /* all the GString stuff wants a terminating null character, so it even adds
-   * space in g_string_sized_new(), thus the BUF_SIZE-1 */
-  state->in_buf = g_string_sized_new (BUF_SIZE - 1);
-  state->out_buf = g_string_sized_new (BUF_SIZE - 1);
+   * space in g_string_sized_new(), thus the INITIAL_BUF_SIZE-1 */
+  state->in_buf = g_string_sized_new (INITIAL_BUF_SIZE - 1);
+  state->out_buf = g_string_sized_new (INITIAL_BUF_SIZE - 1);
 
   state->zs = xmalloc (sizeof (z_stream));
 
@@ -417,6 +418,21 @@ check_gzip_header (GzipChunksState *state)
     }
 
   return TRUE;
+} 
+
+static void
+expand_buffers (GzipChunksState *state)
+{
+  int next_in_offset = (char *) state->zs->next_in - (char *) state->in_buf->str;
+  state->in_buf->len = state->in_buf->allocated_len;
+  g_string_set_size (state->in_buf, 2 * state->in_buf->allocated_len - 1);
+  state->zs->next_in = (unsigned char *) state->in_buf->str + next_in_offset;
+
+  int next_out_offset = (char *) state->zs->next_out - (char *) state->out_buf->str;
+  state->out_buf->len = state->out_buf->allocated_len;
+  g_string_set_size (state->out_buf, 2 * state->out_buf->allocated_len - 1);
+  state->zs->next_out = (unsigned char *) state->out_buf->str + next_out_offset;
+  state->zs->avail_out = state->out_buf->allocated_len - next_out_offset;
 }
 
 static gboolean
@@ -436,9 +452,21 @@ check_gzip_data (GzipChunksState *state)
 
       unsigned char *next_out_before = state->zs->next_out;
 
+      status = Z_OK;
       status = inflate (state->zs, Z_NO_FLUSH);
+      while (status == Z_BUF_ERROR && state->in_buf->allocated_len < MAX_BUF_SIZE)
+        {
+          expand_buffers (state);
+          refresh_in_buf (state->fin, state->zs, state->in_buf);
+          status = inflate (state->zs, Z_NO_FLUSH);
+        }
 
-      if (status == Z_DATA_ERROR)
+      if (status == Z_BUF_ERROR)
+        {
+          info ("purported gzip chunk wants to expand buffers beyond %ld bytes, assuming corrupt data", state->in_buf->allocated_len);
+          return FALSE;
+        }
+      else if (status == Z_DATA_ERROR)
         {
           info ("purported gzip chunk has bad data: %s", state->zs->msg);
           return FALSE;
@@ -657,7 +685,7 @@ main (int    argc,
   FILE *report_out = state.fout == stdout ? stderr : stdout;
   fprintf (report_out, "%s: dumped %d %s gzip chunks totaling %lld bytes\n", 
       g_get_prgname (), state.dumped_chunks, 
-      options.invalid ? "invalid" : "valid", state.dumped_bytes);
+      options.invalid ? "invalid" : "valid", (long long) state.dumped_bytes);
 
   free_state_stuff (&state);
 
