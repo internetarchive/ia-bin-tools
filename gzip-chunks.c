@@ -35,8 +35,9 @@ typedef struct
   z_stream      *zs;
   GString       *in_buf;
   GString       *out_buf;
-  GString       *chunk_buf;
-  off_t          chunk_offset;
+  off_t          good_chunk_offset;
+  off_t          bad_chunk_offset;
+  // GString       *chunk_buf; /* good or bad chunk depending on options.invalid */
   unsigned long  crc;
   char          *split_dir;
 } GzipChunksState;
@@ -59,16 +60,20 @@ static struct
   gboolean  invalid;
   gboolean  split;
   char     *split_dir;
+  off_t     start_offset;
+  off_t     end_offset;
 } 
-options = { FALSE, NULL, FALSE, FALSE, NULL };
+options = { FALSE, NULL, FALSE, FALSE, NULL, -1, -1 };
 
 static GOptionEntry entries[] =
 {
-  { "verbose", '\0', 0, G_OPTION_ARG_NONE, &options.verbose, "report verbosely on gzip doings", NULL },
-  { "output", 'o', 0, G_OPTION_ARG_STRING, &options.output_file, "file to write (defaults to stdout)", NULL },
-  { "invalid", 'x', 0, G_OPTION_ARG_NONE, &options.split_dir, "invert the operation - write chunks that are NOT valid gzip chunks", NULL },
-  { "split", '\0', 0, G_OPTION_ARG_NONE, &options.split, "write each chunk to a separate file, in a randomly named directory in temp space", NULL },
-  { "split-dir", 'd', 0, G_OPTION_ARG_STRING, &options.split_dir, "write each chunk separate file in the specified directory", NULL },
+  { "verbose", '\0', 0, G_OPTION_ARG_NONE, &options.verbose, "Report verbosely on gzip doings", NULL },
+  { "output", 'o', 0, G_OPTION_ARG_STRING, &options.output_file, "Write to specified file (default is stdout)", NULL },
+  { "invalid", 'x', 0, G_OPTION_ARG_NONE, &options.invalid, "Invert the operation - write chunks that are NOT valid gzip chunks", NULL },
+  { "split", '\0', 0, G_OPTION_ARG_NONE, &options.split, "Write each chunk to a separate file, in a randomly named directory in temp space", NULL },
+  { "split-dir", 'd', 0, G_OPTION_ARG_STRING, &options.split_dir, "Write each chunk separate file in the specified directory", NULL },
+  { "start", '\0', 0, G_OPTION_ARG_INT64, &options.start_offset, "Start processing input at specified byte offset", NULL },
+  { "end", '\0', 0, G_OPTION_ARG_INT64, &options.end_offset, "Stop processing input at specified byte offset", NULL },
   { NULL }
 };
 
@@ -133,7 +138,10 @@ free_state_stuff (GzipChunksState *state)
   free (state->zs);
   g_string_free (state->out_buf, TRUE);
   g_string_free (state->in_buf, TRUE);
-  g_string_free (state->chunk_buf, TRUE);
+  /*
+  if (state->chunk_buf)
+    g_string_free (state->chunk_buf, TRUE);
+    */
 }
 
 static void
@@ -141,7 +149,17 @@ init_state (GzipChunksState   *state,
             int               *argc,
             char            ***argv)
 {
-  GOptionContext *context = g_option_context_new ("[FILE]");
+  state->fin = NULL;
+  state->fout = NULL;
+  state->zs = NULL;
+  state->in_buf = NULL;
+  state->out_buf = NULL;
+  state->good_chunk_offset = -1;
+  state->bad_chunk_offset = -1;
+  state->crc = 0;
+  state->split_dir = NULL;
+
+  GOptionContext *context = g_option_context_new ("FILE");
   GError *error = NULL;
 
   g_option_context_add_main_entries (context, entries, NULL);
@@ -154,9 +172,9 @@ init_state (GzipChunksState   *state,
       exit (1);
     }
 
-  if (*argc > 2)
+  if (*argc != 2)
     {
-      fprintf (stderr, "%s: error: at most one input filename allowed\n\n", g_get_prgname ());
+      fprintf (stderr, "%s: error: exactly one input filename required\n\n", g_get_prgname ());
       fputs (g_option_context_get_help (context, TRUE, NULL), stderr);
       exit (1);
     }
@@ -225,7 +243,25 @@ init_state (GzipChunksState   *state,
    * space in g_string_sized_new(), thus the BUF_SIZE-1 */
   state->in_buf = g_string_sized_new (BUF_SIZE - 1);
   state->out_buf = g_string_sized_new (BUF_SIZE - 1);
-  state->chunk_buf = g_string_new ("");
+
+#if 0
+  errno = 0;
+  int status = fseeko (state->fin, 0, SEEK_END);
+  if (status == 0)
+    status = fseeko (state->fin, 0, SEEK_SET); /* move it back */
+  if (status != 0)
+    die ("input must be seekable: fseeko: %s", g_strerror (errno));
+  if (status != 0)
+    if (errno == ESPIPE)
+      {
+        info ("input is not seekable, will buffer chunks for output: %s", g_strerror (errno));
+        state->chunk_buf = g_string_new ("");
+      }
+    else
+      die ("fseeko: %s", g_strerror (errno));
+  else
+    state->chunk_buf = NULL;
+#endif
 
   state->zs = xmalloc (sizeof (z_stream));
 
@@ -293,7 +329,10 @@ next_chunk_byte (GzipChunksState *state)
     {
       state->zs->avail_in--;
       state->zs->next_in++;
-      g_string_append_c (state->chunk_buf, byte);
+      /*
+      if (state->chunk_buf)
+        g_string_append_c (state->chunk_buf, byte);
+        */
     }
 
   return byte;
@@ -403,7 +442,10 @@ read_data (GzipChunksState *state)
         die ("inflate returned unexpected status %d: probably indicates a bug in %s", 
             status, g_get_prgname ());
 
-      g_string_append_len (state->chunk_buf, (char *) next_in_before, state->zs->next_in - next_in_before);  
+      /*
+      if (state->chunk_buf)
+        g_string_append_len (state->chunk_buf, (char *) next_in_before, state->zs->next_in - next_in_before);  
+        */
 
       state->crc = crc32 (state->crc, next_out_before, state->zs->next_out - next_out_before);
     }
@@ -445,16 +487,30 @@ read_footer (GzipChunksState *state)
   return TRUE;
 }
 
+static off_t
+get_offset (GzipChunksState *state)
+{
+  return ftello (state->fin) - state->zs->avail_in;
+}
+
 /* returns true if it reads a valid gzip chunk, false if not */
 static gboolean
 read_chunk (GzipChunksState *state)
 {
-  g_string_set_size (state->chunk_buf, 0);
-  state->chunk_offset = ftello (state->fin) - state->zs->avail_in;
+  /* g_string_set_size (state->chunk_buf, 0); */
+  off_t chunk_offset = get_offset (state);
 
-  return read_header (state) 
-    && read_data (state)
-    && read_footer (state);
+  if (read_header (state) 
+      && read_data (state)
+      && read_footer (state))
+    {
+      state->good_chunk_offset = chunk_offset;
+      return TRUE;
+    }
+  else if (state->bad_chunk_offset < 0)
+    state->bad_chunk_offset = chunk_offset;
+
+  return FALSE;
 }
 
 /* returns true if magic found, false if eof */
@@ -487,6 +543,87 @@ find_magic (GzipChunksState *state)
     }
 }
 
+/* This function should be called after reading a good gzip chunk, or on eof.
+ * If --invalid and we have an invalid chunk, write it. If not, write the valid
+ * chunk.
+ */
+static void
+maybe_write_chunk (GzipChunksState *state)
+{
+  off_t ftello_before = ftello (state->fin);
+
+  off_t start_offset = -1;
+  if (!options.invalid && state->good_chunk_offset >= 0)
+    {
+      info ("writing good chunk offset=%lld length=%ld", 
+          (long long) state->good_chunk_offset, get_offset (state) - state->good_chunk_offset);
+      start_offset = state->good_chunk_offset;
+    }
+  else if (options.invalid && state->bad_chunk_offset >= 0)
+    {
+      info ("writing bad chunk offset=%lld length=%ld", 
+          (long long) state->bad_chunk_offset, get_offset (state) - state->bad_chunk_offset);
+      start_offset = state->bad_chunk_offset;
+    }
+  else
+    return;
+
+  off_t bytes_to_write = get_offset (state) - start_offset;
+
+  FILE *fout = state->fout;
+  if (state->split_dir)
+    {
+      GString *filename = g_string_new ("");
+
+      if (options.invalid)
+        g_string_printf (filename, "%s/bad-chunk-offset-%lld.dat",
+            state->split_dir, (long long) start_offset);
+      else
+        g_string_printf (filename, "%s/good-chunk-offset-%lld.gz",
+            state->split_dir, (long long) start_offset);
+
+      errno = 0;
+      fout = fopen (filename->str, "wb");
+      if (fout == NULL) 
+        die ("%s: %s", filename->str, g_strerror (errno));
+
+      info ("writing %s", filename->str);
+
+      g_string_free (filename, TRUE);
+    }
+
+  errno = 0;
+  if (fseeko (state->fin, start_offset, SEEK_SET) != 0)
+    die ("fseeko: %s", g_strerror (errno));
+
+  off_t n;
+  for (n = 0; n < bytes_to_write; n++)
+    { 
+      int byte = fgetc (state->fin);
+      g_assert (byte != EOF);
+      byte = fputc (byte, fout);
+      if (byte == EOF)
+        /* shouldn't ever happen so don't worry too much about the error message, right? */
+        die ("error writing"); 
+    }
+
+  if (state->split_dir)
+    fclose (fout);
+
+  /* seek back to end of buffered in */
+  errno = 0;
+  if (fseeko (state->fin, state->zs->avail_in, SEEK_CUR) != 0)
+    die ("fseeko: %s", g_strerror (errno));
+
+  g_assert (ftello (state->fin) == ftello_before);
+  /*
+  size_t bytes_written = fwrite (state->chunk_buf->str, 1, state->chunk_buf->len, fout);
+  if (bytes_written != state->chunk_buf->len)
+    die ("problem writing: wrote %d bytes (expected %d)", bytes_written, state->chunk_buf->len);
+    */
+
+}
+
 int
 main (int    argc,
       char **argv)
@@ -494,9 +631,22 @@ main (int    argc,
   setlocale (LC_ALL, "");
 
   GzipChunksState state;
-
   init_state (&state, &argc, &argv);
 
+  while (peek_byte (&state) != EOF)
+    {
+      if (read_chunk (&state))
+        {
+          maybe_write_chunk (&state);
+          state.bad_chunk_offset = -1;
+          state.good_chunk_offset = -1;
+        }
+      else
+        find_magic (&state);
+    }
+  maybe_write_chunk (&state);
+
+  /*
   off_t elision_offset = -1;
   while (peek_byte (&state) != EOF)
     {
@@ -505,45 +655,23 @@ main (int    argc,
           if (elision_offset >= 0)
             {
               info ("elided %lld bytes starting at offset %lld", 
-                    (long long) (state.chunk_offset - elision_offset), (long long) elision_offset);
+                    (long long) (state.good_chunk_offset - elision_offset), (long long) elision_offset);
               elision_offset = -1;
             }
-          info ("writing good chunk offset=%lld length=%ld", 
-                (long long) state.chunk_offset, state.chunk_buf->len);
 
-          FILE *fout = state.fout;
-          if (state.split_dir)
-            {
-              GString *filename = g_string_new ("");
-              g_string_printf (filename, "%s/good-chunk-offset-%lld.gz", state.split_dir, (long long) state.chunk_offset);
-
-              errno = 0;
-              fout = fopen (filename->str, "wb");
-              if (fout == NULL) 
-                die ("%s: %s", filename->str, g_strerror (errno));
-
-              info ("writing %s", filename->str);
-
-              g_string_free (filename, TRUE);
-            }
-
-          size_t bytes_written = fwrite (state.chunk_buf->str, 1, state.chunk_buf->len, fout);
-          if (bytes_written != state.chunk_buf->len)
-            die ("problem writing: wrote %d bytes (expected %d)", bytes_written, state.chunk_buf->len);
-
-          if (state.split_dir)
-            fclose (fout);
+          maybe_write_chunk (&state);
         }
       else
         {
           info ("eliding bad chunk");
-          elision_offset = state.chunk_offset;
+          elision_offset = state.good_chunk_offset;
           find_magic (&state);
         }
     }
 
   if (elision_offset >= 0) info ("elided %lld bytes starting at offset %lld",
         (long long) (ftello (state.fin) - elision_offset), (long long) elision_offset);
+        */
 
   free_state_stuff (&state);
 
