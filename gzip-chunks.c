@@ -62,7 +62,7 @@ static struct
   off_t     start_offset;
   off_t     end_offset;
 } 
-options = { FALSE, NULL, FALSE, FALSE, NULL, -1, -1 };
+options = { FALSE, NULL, FALSE, FALSE, NULL, 0, -1 };
 
 static GOptionEntry entries[] =
 {
@@ -396,7 +396,6 @@ read_data (GzipChunksState *state)
       state->zs->next_out = (unsigned char *) state->out_buf->str;
       state->zs->avail_out = state->out_buf->allocated_len;
 
-      unsigned char *next_in_before = state->zs->next_in;
       unsigned char *next_out_before = state->zs->next_out;
 
       status = inflate (state->zs, Z_NO_FLUSH);
@@ -411,11 +410,6 @@ read_data (GzipChunksState *state)
       else if (status != Z_OK && status != Z_STREAM_END)
         die ("inflate returned unexpected status %d: probably indicates a bug in %s", 
             status, g_get_prgname ());
-
-      /*
-      if (state->chunk_buf)
-        g_string_append_len (state->chunk_buf, (char *) next_in_before, state->zs->next_in - next_in_before);  
-        */
 
       state->crc = crc32 (state->crc, next_out_before, state->zs->next_out - next_out_before);
     }
@@ -593,16 +587,27 @@ main (int    argc,
   GzipChunksState state;
   init_state (&state, &argc, &argv);
 
-  while (peek_byte (&state) != EOF)
+  if (options.start_offset)
+    if (fseeko (state.fin, options.start_offset, SEEK_SET) != 0)
+      die ("fseeko: %s", g_strerror (errno));
+
+  while (peek_byte (&state) != EOF && 
+      (options.end_offset < 0 || get_offset (&state) < options.end_offset))
     {
       if (read_chunk (&state))
         {
+          /* Only now do we know the bad chunk preceding this good chunk, if
+           * any, is complete. Write out either the new good chunk or the
+           * preceding bad chunk, depending if --invalid. */
           maybe_write_chunk (&state);
           state.bad_chunk_offset = -1;
           state.good_chunk_offset = -1;
         }
       else
-        find_magic (&state);
+        {
+          state.good_chunk_offset = -1;
+          find_magic (&state);
+        }
     }
   maybe_write_chunk (&state);
 
