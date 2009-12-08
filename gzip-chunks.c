@@ -39,8 +39,10 @@ typedef struct
   off_t          bad_chunk_offset;
   unsigned long  crc;
   char          *split_dir;
-  int            dumped_chunks;
-  off_t          dumped_bytes;
+  int            good_chunks;
+  off_t          good_bytes;
+  int            bad_chunks;
+  off_t          bad_bytes;
 } 
 GzipChunksState;
 
@@ -158,8 +160,10 @@ init_state (GzipChunksState   *state,
   state->bad_chunk_offset = -1;
   state->crc = 0;
   state->split_dir = NULL;
-  state->dumped_chunks = 0;
-  state->dumped_bytes = 0;
+  state->good_chunks = 0;
+  state->good_bytes = 0;
+  state->bad_chunks = 0;
+  state->bad_bytes = 0;
 
   GOptionContext *context = g_option_context_new ("FILE");
   GError *error = NULL;
@@ -580,6 +584,7 @@ find_magic (GzipChunksState *state)
 static void
 maybe_write_chunk (GzipChunksState *state)
 {
+
   off_t start_offset = -1;
   if (!options.invalid && state->good_chunk_offset >= 0)
     {
@@ -646,9 +651,6 @@ maybe_write_chunk (GzipChunksState *state)
   errno = 0;
   if (fseeko (state->fin, state->zs->avail_in, SEEK_CUR) != 0)
     die ("fseeko: %s", g_strerror (errno));
-
-  state->dumped_chunks++;
-  state->dumped_bytes += bytes_written;
 }
 
 int
@@ -668,10 +670,19 @@ main (int    argc,
       (options.end_offset < 0 || get_offset (&state) < options.end_offset))
     if (read_chunk (&state))
       {
+	state.good_chunks++;
+	state.good_bytes += get_offset (&state) - state.good_chunk_offset;
+	if (state.bad_chunk_offset >= 0)
+	  {
+	    state.bad_chunks++;
+	    state.bad_bytes += get_offset (&state) - state.bad_chunk_offset;
+	  }
+
         /* Only now do we know the bad chunk preceding this good chunk, if
          * any, is complete. Write out either the new good chunk or the
          * preceding bad chunk, depending if --invalid. */
         maybe_write_chunk (&state);
+
         state.bad_chunk_offset = -1;
         state.good_chunk_offset = -1;
       }
@@ -680,12 +691,27 @@ main (int    argc,
         state.good_chunk_offset = -1;
         find_magic (&state);
       }
+
+  if (state.bad_chunk_offset >= 0)
+    {
+      state.bad_chunks++;
+      state.bad_bytes += get_offset (&state) - state.bad_chunk_offset;
+    }
   maybe_write_chunk (&state);
 
   FILE *report_out = state.fout == stdout ? stderr : stdout;
+  /*
   fprintf (report_out, "%s: dumped %d %s gzip chunks totaling %lld bytes\n", 
       g_get_prgname (), state.dumped_chunks, 
       options.invalid ? "invalid" : "valid", (long long) state.dumped_bytes);
+      */
+  char *tmp = g_format_size_for_display (state.good_bytes);
+  fprintf (report_out, "%s: valid gzip data: %s in %d chunks\n", g_get_prgname (), tmp, state.good_chunks);
+  g_free (tmp);
+
+  tmp = g_format_size_for_display (state.bad_bytes);
+  fprintf (report_out, "%s: invalid data: %s in %d chunks\n", g_get_prgname (), tmp, state.bad_chunks);
+  g_free (tmp);
 
   free_state_stuff (&state);
 
