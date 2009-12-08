@@ -37,7 +37,6 @@ typedef struct
   GString       *out_buf;
   off_t          good_chunk_offset;
   off_t          bad_chunk_offset;
-  // GString       *chunk_buf; /* good or bad chunk depending on options.invalid */
   unsigned long  crc;
   char          *split_dir;
 } GzipChunksState;
@@ -138,10 +137,6 @@ free_state_stuff (GzipChunksState *state)
   free (state->zs);
   g_string_free (state->out_buf, TRUE);
   g_string_free (state->in_buf, TRUE);
-  /*
-  if (state->chunk_buf)
-    g_string_free (state->chunk_buf, TRUE);
-    */
 }
 
 static void
@@ -232,8 +227,6 @@ init_state (GzipChunksState   *state,
   else if (state->split_dir == NULL)
     state->fout = stdout;
 
-  if (isatty (fileno (state->fin)))
-    die ("refusing to read binary data from a tty");
   if (state->fout != NULL && isatty (fileno (state->fout)))
     die ("refusing to write binary data to a tty");
 
@@ -243,25 +236,6 @@ init_state (GzipChunksState   *state,
    * space in g_string_sized_new(), thus the BUF_SIZE-1 */
   state->in_buf = g_string_sized_new (BUF_SIZE - 1);
   state->out_buf = g_string_sized_new (BUF_SIZE - 1);
-
-#if 0
-  errno = 0;
-  int status = fseeko (state->fin, 0, SEEK_END);
-  if (status == 0)
-    status = fseeko (state->fin, 0, SEEK_SET); /* move it back */
-  if (status != 0)
-    die ("input must be seekable: fseeko: %s", g_strerror (errno));
-  if (status != 0)
-    if (errno == ESPIPE)
-      {
-        info ("input is not seekable, will buffer chunks for output: %s", g_strerror (errno));
-        state->chunk_buf = g_string_new ("");
-      }
-    else
-      die ("fseeko: %s", g_strerror (errno));
-  else
-    state->chunk_buf = NULL;
-#endif
 
   state->zs = xmalloc (sizeof (z_stream));
 
@@ -321,7 +295,7 @@ peek_byte (GzipChunksState *state)
 
 /* returns EOF on eof */
 static int 
-next_chunk_byte (GzipChunksState *state)
+get_byte (GzipChunksState *state)
 {
   int byte = peek_byte (state);
 
@@ -329,10 +303,6 @@ next_chunk_byte (GzipChunksState *state)
     {
       state->zs->avail_in--;
       state->zs->next_in++;
-      /*
-      if (state->chunk_buf)
-        g_string_append_c (state->chunk_buf, byte);
-        */
     }
 
   return byte;
@@ -343,20 +313,20 @@ read_header (GzipChunksState *state)
 {
   int i;
   for (i = 0; i < sizeof (GZ_MAGIC); i++)
-    if (next_chunk_byte (state) != GZ_MAGIC[i])
+    if (get_byte (state) != GZ_MAGIC[i])
       {
         info ("purported gzip chunk doesn't start with gzip magic header");
         return FALSE;
       }
 
-  int byte = next_chunk_byte (state);
+  int byte = get_byte (state);
   if (byte != Z_DEFLATED)
     {
       info ("purported gzip chunk has method != Z_DEFLATED");
       return FALSE;
     }
 
-  int flags = next_chunk_byte (state);
+  int flags = get_byte (state);
   if ((flags & RESERVED) != 0)
     {
       info ("purported gzip chunk has reserved bits set");
@@ -365,25 +335,25 @@ read_header (GzipChunksState *state)
   
   /* discard time, xflags and os code */
   for (i = 0; i < 6; i++) 
-    next_chunk_byte (state);
+    get_byte (state);
 
   if ((flags & EXTRA_FIELD) != 0)  
     { 
       info ("flags byte indicates there is an extra field");
 
-      unsigned len = (unsigned) next_chunk_byte (state);
-      len += ((unsigned) next_chunk_byte (state)) << 8;
+      unsigned len = (unsigned) get_byte (state);
+      len += ((unsigned) get_byte (state)) << 8;
 
       /* len is garbage if EOF but the loop below will quit anyway */
-      while (len-- > 0 && next_chunk_byte (state) != EOF);
+      while (len-- > 0 && get_byte (state) != EOF);
     }
 
   if ((flags & ORIG_NAME) != 0) 
     {
       GString *tmp_str = g_string_new ("");
-      for (byte = next_chunk_byte (state); 
+      for (byte = get_byte (state); 
            byte != 0 && byte != EOF; 
-           byte = next_chunk_byte (state))
+           byte = get_byte (state))
         g_string_append_c (tmp_str, byte);
       info ("original name of gzipped file: %s", tmp_str->str);
       g_string_free (tmp_str, TRUE);
@@ -392,9 +362,9 @@ read_header (GzipChunksState *state)
   if ((flags & COMMENT) != 0) 
     {
       GString *tmp_str = g_string_new ("");
-      for (byte = next_chunk_byte (state); 
+      for (byte = get_byte (state); 
            byte != 0 && byte != EOF; 
-           byte = next_chunk_byte (state))
+           byte = get_byte (state))
         g_string_append_c (tmp_str, byte);
       info ("gzip header comment: %s", tmp_str->str);
       g_string_free (tmp_str, TRUE);
@@ -403,8 +373,8 @@ read_header (GzipChunksState *state)
   if ((flags & HEAD_CRC) != 0) 
     { 
       int head_crc[2];
-      head_crc[0] = next_chunk_byte (state);
-      head_crc[1] = next_chunk_byte (state);
+      head_crc[0] = get_byte (state);
+      head_crc[1] = get_byte (state);
       info ("gzip head crc: %02x%02x", head_crc[0], head_crc[1]);
     }
 
@@ -456,10 +426,10 @@ read_data (GzipChunksState *state)
 static gboolean
 read_footer (GzipChunksState *state)
 {
-  unsigned long purported_crc = next_chunk_byte (state);
-  purported_crc += ((unsigned) next_chunk_byte (state)) << 8;
-  purported_crc += ((unsigned) next_chunk_byte (state)) << 16;
-  purported_crc += ((unsigned) next_chunk_byte (state)) << 24;
+  unsigned long purported_crc = get_byte (state);
+  purported_crc += ((unsigned) get_byte (state)) << 8;
+  purported_crc += ((unsigned) get_byte (state)) << 16;
+  purported_crc += ((unsigned) get_byte (state)) << 24;
 
   if (purported_crc != state->crc)
     {
@@ -467,15 +437,15 @@ read_footer (GzipChunksState *state)
       return FALSE;
     }
 
-  unsigned long purported_uncompressed_bytes = next_chunk_byte (state);
-  purported_uncompressed_bytes += ((unsigned) next_chunk_byte (state)) << 8;
-  purported_uncompressed_bytes += ((unsigned) next_chunk_byte (state)) << 16;
+  unsigned long purported_uncompressed_bytes = get_byte (state);
+  purported_uncompressed_bytes += ((unsigned) get_byte (state)) << 8;
+  purported_uncompressed_bytes += ((unsigned) get_byte (state)) << 16;
   if (peek_byte (state) == EOF)
     {
       info ("purported gzip chunk ends in middle of 8 byte footer");
       return FALSE;
     }
-  purported_uncompressed_bytes += ((unsigned) next_chunk_byte (state)) << 24;
+  purported_uncompressed_bytes += ((unsigned) get_byte (state)) << 24;
 
   if (purported_uncompressed_bytes != state->zs->total_out)
     {
@@ -550,8 +520,6 @@ find_magic (GzipChunksState *state)
 static void
 maybe_write_chunk (GzipChunksState *state)
 {
-  off_t ftello_before = ftello (state->fin);
-
   off_t start_offset = -1;
   if (!options.invalid && state->good_chunk_offset >= 0)
     {
@@ -614,14 +582,6 @@ maybe_write_chunk (GzipChunksState *state)
   errno = 0;
   if (fseeko (state->fin, state->zs->avail_in, SEEK_CUR) != 0)
     die ("fseeko: %s", g_strerror (errno));
-
-  g_assert (ftello (state->fin) == ftello_before);
-  /*
-  size_t bytes_written = fwrite (state->chunk_buf->str, 1, state->chunk_buf->len, fout);
-  if (bytes_written != state->chunk_buf->len)
-    die ("problem writing: wrote %d bytes (expected %d)", bytes_written, state->chunk_buf->len);
-    */
-
 }
 
 int
@@ -645,33 +605,6 @@ main (int    argc,
         find_magic (&state);
     }
   maybe_write_chunk (&state);
-
-  /*
-  off_t elision_offset = -1;
-  while (peek_byte (&state) != EOF)
-    {
-      if (read_chunk (&state))
-        {
-          if (elision_offset >= 0)
-            {
-              info ("elided %lld bytes starting at offset %lld", 
-                    (long long) (state.good_chunk_offset - elision_offset), (long long) elision_offset);
-              elision_offset = -1;
-            }
-
-          maybe_write_chunk (&state);
-        }
-      else
-        {
-          info ("eliding bad chunk");
-          elision_offset = state.good_chunk_offset;
-          find_magic (&state);
-        }
-    }
-
-  if (elision_offset >= 0) info ("elided %lld bytes starting at offset %lld",
-        (long long) (ftello (state.fin) - elision_offset), (long long) elision_offset);
-        */
 
   free_state_stuff (&state);
 
