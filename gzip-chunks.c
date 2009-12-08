@@ -76,7 +76,7 @@ static GOptionEntry entries[] =
   { "output", 'o', 0, G_OPTION_ARG_STRING, &options.output_file, "Write to specified file (default is stdout)", "FILE" },
   { "invalid", 'x', 0, G_OPTION_ARG_NONE, &options.invalid, "Invert the operation: write chunks that are NOT valid gzip chunks", NULL },
   { "split", '\0', 0, G_OPTION_ARG_NONE, &options.split, "Write each chunk to a separate file, in a randomly named directory in temp space", NULL },
-  { "split-dir", 'd', 0, G_OPTION_ARG_STRING, &options.split_dir, "Write each chunk separate file in the specified directory", "PATH" },
+  { "split-dir", 'd', 0, G_OPTION_ARG_STRING, &options.split_dir, "Write each chunk to a separate file in the specified directory", "PATH" },
   { "start", '\0', 0, G_OPTION_ARG_INT64, &options.start_offset, "Start processing input at specified byte offset", "OFFSET" },
   { "end", '\0', 0, G_OPTION_ARG_INT64, &options.end_offset, "Stop processing input at specified byte offset", "OFFSET" },
   { NULL }
@@ -670,6 +670,11 @@ main (int    argc,
       (options.end_offset < 0 || get_offset (&state) < options.end_offset))
     if (read_chunk (&state))
       {
+        /* Only now do we know the bad chunk preceding this good chunk, if
+         * any, is complete. Write out either the new good chunk or the
+         * preceding bad chunk, depending if --invalid. */
+        maybe_write_chunk (&state);
+
 	state.good_chunks++;
 	state.good_bytes += get_offset (&state) - state.good_chunk_offset;
 	if (state.bad_chunk_offset >= 0)
@@ -677,11 +682,6 @@ main (int    argc,
 	    state.bad_chunks++;
 	    state.bad_bytes += get_offset (&state) - state.bad_chunk_offset;
 	  }
-
-        /* Only now do we know the bad chunk preceding this good chunk, if
-         * any, is complete. Write out either the new good chunk or the
-         * preceding bad chunk, depending if --invalid. */
-        maybe_write_chunk (&state);
 
         state.bad_chunk_offset = -1;
         state.good_chunk_offset = -1;
@@ -700,11 +700,7 @@ main (int    argc,
   maybe_write_chunk (&state);
 
   FILE *report_out = state.fout == stdout ? stderr : stdout;
-  /*
-  fprintf (report_out, "%s: dumped %d %s gzip chunks totaling %lld bytes\n", 
-      g_get_prgname (), state.dumped_chunks, 
-      options.invalid ? "invalid" : "valid", (long long) state.dumped_bytes);
-      */
+
   char *tmp = g_format_size_for_display (state.good_bytes);
   fprintf (report_out, "%s: valid gzip data: %s in %d chunks\n", g_get_prgname (), tmp, state.good_chunks);
   g_free (tmp);
