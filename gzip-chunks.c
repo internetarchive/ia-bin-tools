@@ -218,7 +218,6 @@ init_state (GzipChunksState   *state,
 
   if (options.output_file != NULL)
     {
-
       errno = 0;
       state->fout = fopen (options.output_file, "wb");
       if (state->fout == NULL) 
@@ -309,7 +308,7 @@ get_byte (GzipChunksState *state)
 }
 
 static gboolean
-read_header (GzipChunksState *state)
+check_gzip_header (GzipChunksState *state)
 {
   int i;
   for (i = 0; i < sizeof (GZ_MAGIC); i++)
@@ -335,54 +334,68 @@ read_header (GzipChunksState *state)
   
   /* discard time, xflags and os code */
   for (i = 0; i < 6; i++) 
-    get_byte (state);
+    byte = get_byte (state);
+
+  if (byte == EOF)
+    {
+      info ("input ends in gzip time / xflags / os code");
+      return FALSE;
+    }
 
   if ((flags & EXTRA_FIELD) != 0)  
     { 
-      info ("flags byte indicates there is an extra field");
-
       unsigned len = (unsigned) get_byte (state);
       len += ((unsigned) get_byte (state)) << 8;
 
-      /* len is garbage if EOF but the loop below will quit anyway */
-      while (len-- > 0 && get_byte (state) != EOF);
+      for (i = 0; i < len; i++)
+        byte = get_byte (state);
+      if (byte == EOF)
+        {
+          info ("input ends in gzip extra field");
+          return FALSE;
+        }
     }
 
   if ((flags & ORIG_NAME) != 0) 
     {
-      GString *tmp_str = g_string_new ("");
       for (byte = get_byte (state); 
-           byte != 0 && byte != EOF; 
-           byte = get_byte (state))
-        g_string_append_c (tmp_str, byte);
-      info ("original name of gzipped file: %s", tmp_str->str);
-      g_string_free (tmp_str, TRUE);
+          byte != 0 && byte != EOF; 
+          byte = get_byte (state));
+      if (byte == EOF)
+        {
+          info ("input ends in gzip extra field");
+          return FALSE;
+        }
     }
 
   if ((flags & COMMENT) != 0) 
-    {
-      GString *tmp_str = g_string_new ("");
+  {
       for (byte = get_byte (state); 
-           byte != 0 && byte != EOF; 
-           byte = get_byte (state))
-        g_string_append_c (tmp_str, byte);
-      info ("gzip header comment: %s", tmp_str->str);
-      g_string_free (tmp_str, TRUE);
-    }
+          byte != 0 && byte != EOF; 
+          byte = get_byte (state))
+      if (byte == EOF)
+        {
+          info ("input ends in gzip comment field");
+          return FALSE;
+        }
+  }
 
   if ((flags & HEAD_CRC) != 0) 
-    { 
-      int head_crc[2];
-      head_crc[0] = get_byte (state);
-      head_crc[1] = get_byte (state);
-      info ("gzip head crc: %02x%02x", head_crc[0], head_crc[1]);
+    {
+      byte = get_byte (state);
+      byte = get_byte (state);
+      if (byte == EOF)
+        {
+          info ("input ends in gzip comment field");
+          return FALSE;
+        }
     }
 
   return TRUE;
 }
 
 static gboolean
-read_data (GzipChunksState *state)
+check_gzip_data (GzipChunksState *state)
 {
   if (inflateReset (state->zs) != Z_OK) 
     die ("inflateReset failed: probably indicates a bug in %s", g_get_prgname ());
@@ -418,7 +431,7 @@ read_data (GzipChunksState *state)
 }
 
 static gboolean
-read_footer (GzipChunksState *state)
+check_gzip_footer (GzipChunksState *state)
 {
   unsigned long purported_crc = get_byte (state);
   purported_crc += ((unsigned) get_byte (state)) << 8;
@@ -464,9 +477,9 @@ read_chunk (GzipChunksState *state)
   /* g_string_set_size (state->chunk_buf, 0); */
   off_t chunk_offset = get_offset (state);
 
-  if (read_header (state) 
-      && read_data (state)
-      && read_footer (state))
+  if (check_gzip_header (state) 
+      && check_gzip_data (state)
+      && check_gzip_footer (state))
     {
       state->good_chunk_offset = chunk_offset;
       return TRUE;
