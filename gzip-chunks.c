@@ -543,7 +543,7 @@ maybe_write_chunk (GzipChunksState *state)
     }
   else if (options.invalid && state->bad_chunk_offset >= 0)
     {
-      info ("writing bad chunk offset=%lld length=%ld", 
+      info ("writing bad chunk offset=%lld length=%lld", 
           (long long) state->bad_chunk_offset, 
           (long long) (get_offset (state) - state->bad_chunk_offset));
       start_offset = state->bad_chunk_offset;

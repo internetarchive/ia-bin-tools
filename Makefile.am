@@ -1,6 +1,6 @@
 # $Id$
 
-bin_PROGRAMS = bin-search gzip-chunks
+bin_PROGRAMS = bin-search gzip-chunks whoiz
 
 bin_search_SOURCES = \
 	bin-search.c	
@@ -40,6 +40,26 @@ gzip_chunks_LDFLAGS = \
 
 gzip_chunks_LDADD = \
 	$(ZLIB_LIBS)	\
+	$(GLIB_LIBS)	\
+ 	$(INTLLIBS)
+
+whoiz_SOURCES = \
+	whoiz.c
+
+whoiz_CPPFLAGS = \
+	-I$(top_srcdir)		\
+	$(DISABLE_DEPRECATED)	\
+	$(AM_CPPFLAGS)
+
+whoiz_CFLAGS = \
+	$(GLIB_CFLAGS)	\
+	$(WARN_CFLAGS)	\
+	$(AM_CFLAGS)
+
+whoiz_LDFLAGS = \
+	$(AM_LDFLAGS)
+
+whoiz_LDADD = \
 	$(GLIB_LIBS)	\
  	$(INTLLIBS)
 

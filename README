@@ -1,0 +1,30 @@
+How to build?
+
+  * from tarball: ./configure && make && sudo make install
+  * from svn: ./autogen.sh && make && sudo make install
+
+  See also the file INSTALL.
+
+Why another whois client?
+
+  1. Apache license
+  2. Recursive lookup starting with whois.iana.org
+  3. Support for whois:// URLs
+
+  When I started working on the whois fetcher for Heritrix I went looking for
+  some existing code to base it on. But the existing clients were all GPL, and
+  Heritrix is now mostly Apache licensed. So I started from scratch.
+
+  Existing whois clients mostly have lists of servers for different TLDs and
+  such. But it turns out that today only a small handful of servers need to be
+  hardcoded, because you can lookup TLDs at whois.iana.org, and it will refer
+  you to a more specific server. 
+
+  In addition, this whois client supports whois://{server}/{query} URLs, a
+  scheme I invented for Heritrix.
+
+  Note: as of this writing, the whois fetcher is not yet included in Heritrix.
+  See: http://webarchive.jira.com/browse/HER-1645
+
+Noah Levitt
+Thu Aug 13 15:18:50 PDT 2009
