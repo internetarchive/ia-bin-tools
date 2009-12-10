@@ -353,3 +353,4 @@ main (int    argc,
 
   exit (found_match ? 0 : 255);
 }
+
