@@ -31,6 +31,7 @@
 #include <errno.h>
 #include <stdint.h>
 #include <locale.h>
+#include <unistd.h>
 
 /* For systems that distinguish between text and binary I/O.
    O_BINARY is usually declared in fcntl.h  */
