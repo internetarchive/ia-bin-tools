@@ -16,8 +16,6 @@
 
 /* Written by Ulrich Drepper <drepper@gnu.ai.mit.edu>.  */
 
-/* #include <config.h> */
-
 #include <stdlib.h>
 #include <stdio.h>
 #include <getopt.h>
@@ -900,8 +898,6 @@ main (int argc, char **argv)
 
   /* Setting values of global variables.  */
   setlocale (LC_ALL, "");
-
-  /* atexit (close_stdout); */
 
   /* Line buffer stdout to ensure lines are written atomically and immediately
      so that processes running in parallel do not intersperse their output.  */
