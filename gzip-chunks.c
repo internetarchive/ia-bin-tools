@@ -584,7 +584,6 @@ find_magic (GzipChunksState *state)
 static void
 maybe_write_chunk (GzipChunksState *state)
 {
-
   off_t start_offset = -1;
   if (!options.invalid && state->good_chunk_offset >= 0)
     {

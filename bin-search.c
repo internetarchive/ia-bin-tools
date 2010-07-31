@@ -268,17 +268,6 @@ print_results (const char *string,
                gint64      line_pos,
                gboolean    prefix)
 {
-  if (!options.any)
-    {
-      /* backtrack */
-      while (line_pos > 0 && compare (string, line_buf->str) == 0)
-        line_pos = get_line_at_pos (io_channel, line_pos - 1, line_buf);
-
-      /* get next line if we went too far */
-      if (compare (string, line_buf->str) != 0)
-        line_pos = get_line_at_pos (io_channel, line_pos + line_buf->len, line_buf);
-    }
-
   if (!options.quiet)
     g_printerr ("%s%sFound string at offset: %lld\n", 
                 prefix ? filename : "", prefix ? ": " : "", 
@@ -309,25 +298,32 @@ bin_search (const char *string,
   GString *line_buf = g_string_new ("");
   int len = strlen (string);
   gboolean found_match = FALSE;
+  gint64 line_pos;
 
   while (right - left >= len)
     {
       gint64 pos = (left + right + 1) / 2;
 
-      gint64 line_pos = get_line_at_pos (io_channel, pos, line_buf);
+      line_pos = get_line_at_pos (io_channel, pos, line_buf);
 
       int cmp = compare (string, line_buf->str);
-      if (cmp == 0)
-        {
-          found_match = TRUE;
-          print_results (string, filename, io_channel, line_buf, line_pos, prefix);
-          break;
-        }
-      else if (cmp < 0)
+      if (cmp == 0 && options.any) 
+        break;
+      /* when searching for first match, a match match (cmp==0) is too far */
+      else if (cmp <= 0)
         right = pos - 1;
       else 
         left = pos + 1;
     }
+
+  /* if !options.any, we have been searching for the first match and may have
+   * ended up on it, or on the preceding line, so move to next line if necessary */
+  if (!options.any && compare (string, line_buf->str) != 0)
+    line_pos = get_line_at_pos (io_channel, line_pos + line_buf->len, line_buf);
+  
+  found_match = (compare (string, line_buf->str) == 0);
+  if (found_match)
+    print_results (string, filename, io_channel, line_buf, line_pos, prefix);
 
   /* finished, clean up */
   g_io_channel_unref (io_channel);
