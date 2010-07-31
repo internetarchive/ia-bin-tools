@@ -310,7 +310,7 @@ parse_command_line (int    argc,
   g_option_context_set_summary (context, "Perform whois queries (RFC 3912).");
   g_option_context_add_main_entries (context, entries, NULL);
   g_option_context_set_description (context, 
-      "Examples of usage:\n"
+      "Examples:\n"
       "  whoiz archive.org\n"
       "  whoiz whois://whois.pir.org/archive.org\n"
       "  whoiz whois:///192.168.1.1\n"

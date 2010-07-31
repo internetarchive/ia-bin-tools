@@ -175,7 +175,7 @@ init_state (GzipChunksState   *state,
       "This tool dumps valid gzip chunks from the input. To put it another way, it\n"
       "elides invalid data.\n"
       "\n"
-      "Examples of usage:\n"
+      "Examples:\n"
       "\n"
       "  # salvage good records from a bad warc.gz\n"
       "  gzip-chunks bad.warc.gz > repaired.warc.gz\n"
