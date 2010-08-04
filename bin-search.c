@@ -41,8 +41,9 @@ static struct
   int       field;
   gboolean  quiet;
   gboolean  reverse;
+  gboolean  silent;
 } 
-options = { FALSE, FALSE, "\t", FALSE, 1, FALSE, FALSE };
+options = { FALSE, FALSE, "\t", FALSE, 1, FALSE, FALSE, FALSE };
 
 static GOptionEntry entries[] =
 {
@@ -58,6 +59,7 @@ static GOptionEntry entries[] =
   { "field", 'f', 0, G_OPTION_ARG_INT, &options.field, "Use sorted column X"
     " for comparison. Default is 1.", "X" },
   { "quiet", 'q', 0, G_OPTION_ARG_NONE, &options.quiet, "Quiet(er).", NULL },
+  { "silent", 0, 0, G_OPTION_ARG_NONE, &options.silent, "Silent(er).", NULL },
   { "reverse", 'r', 0, G_OPTION_ARG_NONE, &options.reverse, "The file is in"
     " \"sort -r\" order.", NULL },
   { NULL }
@@ -270,6 +272,9 @@ print_results (const char *string,
                gint64      line_pos,
                gboolean    prefix)
 {
+  if (options.silent)
+    return;
+
   if (!options.quiet)
     g_printerr ("%s%sFound string at offset: %lld\n", 
                 prefix ? filename : "", prefix ? ": " : "", 
