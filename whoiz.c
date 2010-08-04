@@ -48,7 +48,7 @@ static const char *FALLBACK_CCTLD_WHOIS_SERVER = "whois.cocca.cx";
  * [whois://whois.verisign-grs.com/domain%201stbattalion9thmarinesfirebase.net]    Whois Server: whois.fastdomain.com
  * [server: whois.arin.net] [query: "206.51.225.143"] ReferralServer: rwhois://rwhois.noc4hosts.com:4321/
  */
-static const char *REFERRAL_SERVER_PATTERN = "^\\s*(?:whois server|ReferralServer)[^:\r\n]*:.*?([a-zA-Z0-9.:-]+)/*$";
+static const char *REFERRAL_SERVER_PATTERN = "^\\s*(?:whois server|ReferralServer|whois)[^:\r\n]*:.*?([a-zA-Z0-9.:-]+)/*$";
 
 /* Break the connection after receiving more than this many bytes */
 static const gsize MAX_SANE_RESPONSE_BYTES = 50000;
