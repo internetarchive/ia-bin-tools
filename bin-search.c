@@ -250,6 +250,8 @@ compare (const char *string,
       int n; 
       for (n = 0; linep[n] != '\0' && linep[n] != '\n' && linep[n] != *options.delim; n++);
       result = strncmp (string, linep, n); 
+      if (result == 0 && strlen (string) > n)
+        result = 1;
     }
   else
     result = strncmp (string, linep, strlen (string));
