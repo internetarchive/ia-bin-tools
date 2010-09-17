@@ -323,8 +323,8 @@ bin_search (const char *string,
         left = pos + 1;
     }
 
-  /* if !options.any, we have been searching for the first match and may have
-   * ended up on it, or on the preceding line, so move to next line if necessary */
+  /* if !options.any, we are searching for the first match and may have ended
+   * up on it, or on the preceding line, so move to next line if necessary */
   if (!options.any && compare (string, line_buf->str) != 0)
     line_pos = get_line_at_pos (io_channel, line_pos + line_buf->len, line_buf);
   
@@ -352,7 +352,7 @@ main (int    argc,
   gboolean found_match = FALSE;
 
   for (i = 2; i < argc; i++)
-    found_match = (found_match || bin_search (argv[1], argv[i], argc > 3));
+    found_match = (bin_search (argv[1], argv[i], argc > 3) || found_match);
 
   exit (found_match ? 0 : 255);
 }
