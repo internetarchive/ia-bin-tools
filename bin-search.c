@@ -305,7 +305,7 @@ bin_search (const char *string,
   GString *line_buf = g_string_new ("");
   int len = strlen (string);
   gboolean found_match = FALSE;
-  gint64 line_pos;
+  gint64 line_pos = -1;
 
   while (right - left >= len)
     {
@@ -325,7 +325,7 @@ bin_search (const char *string,
 
   /* if !options.any, we are searching for the first match and may have ended
    * up on it, or on the preceding line, so move to next line if necessary */
-  if (!options.any && compare (string, line_buf->str) != 0)
+  if (line_pos >= 0 && !options.any && compare (string, line_buf->str) != 0)
     line_pos = get_line_at_pos (io_channel, line_pos + line_buf->len, line_buf);
   
   found_match = (compare (string, line_buf->str) == 0);
