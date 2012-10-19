@@ -700,11 +700,11 @@ main (int    argc,
 
   FILE *report_out = state.fout == stdout ? stderr : stdout;
 
-  char *tmp = g_format_size_for_display (state.good_bytes);
+  char *tmp = g_format_size (state.good_bytes);
   fprintf (report_out, "%s: valid gzip data: %s in %d chunks\n", g_get_prgname (), tmp, state.good_chunks);
   g_free (tmp);
 
-  tmp = g_format_size_for_display (state.bad_bytes);
+  tmp = g_format_size (state.bad_bytes);
   fprintf (report_out, "%s: invalid data: %s in %d chunks\n", g_get_prgname (), tmp, state.bad_chunks);
   g_free (tmp);
 
