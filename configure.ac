@@ -12,9 +12,9 @@ AC_ISC_POSIX
 AC_HEADER_STDC
 AC_PROG_LIBTOOL
 
-PKG_CHECK_MODULES([GLIB], [glib-2.0 >= 2.21
-                           gio-2.0 >= 2.21
-                           gobject-2.0 >= 2.21])
+PKG_CHECK_MODULES([GLIB], [glib-2.0 >= 2.30
+                           gio-2.0 >= 2.30
+                           gobject-2.0 >= 2.30])
 
 AC_CHECK_HEADER([zlib.h], [], AC_MSG_ERROR([zlib header file zlib.h not found]))
 AC_CHECK_LIB([z], [inflate], [ZLIB_LIBS=-lz], AC_MSG_ERROR([zlib library libz not found]))

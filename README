@@ -1,3 +1,5 @@
+Readme for ia-bin-tools: Internet Archive Command-line Utilities
+
 Tools included:
 
    sha1sum, md5sum: forked from gnu coreutils, but with base32 support added
@@ -9,17 +11,17 @@ Tools included:
 
    whoiz: performs whois queries (RFC 3912)
 
-How to build?
+Download:
+
+   Download latest stable source distribution:
+   https://builds.archive.org:1443/job/ia-bin-tools/lastStableBuild/
+
+Build:
 
    * from tarball: ./configure && make && sudo make install
    * from git: ./autogen.sh && make && sudo make install
 
    See also the file INSTALL.
-
-Download:
-
-   Download latest stable source distribution:
-   https://builds.archive.org:1443/job/ia-bin-tools/lastStableBuild/
 
 Development:
 
