@@ -260,7 +260,7 @@ parse_whois_url (char  *url,
                  char **server,
                  char **query)
 {
-  char *whois_url_pattern = "whois://([^/]*)/(.*)$";
+  char *whois_url_pattern = "whois:(?://([^/]*)/)?(.*)$";
   GError *error = NULL;
   gboolean is_whois_url = FALSE;
 
@@ -313,7 +313,7 @@ parse_command_line (int    argc,
       "Examples:\n"
       "  whoiz archive.org\n"
       "  whoiz whois://whois.pir.org/archive.org\n"
-      "  whoiz whois:///192.168.1.1\n"
+      "  whoiz whois:192.168.1.1\n"
       "  whoiz -h whois.ripe.net -- -q sources\n"
       "  whoiz whois://whois.ripe.net:43/-q\%20sources\n");
 
