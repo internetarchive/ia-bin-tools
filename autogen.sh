@@ -1,13 +1,12 @@
 #!/bin/sh
 #
-# $Id$ 
-#
 # Run this to generate all the initial makefiles, etc.
+#
 
 srcdir=`dirname $0`
 test -z "$srcdir" && srcdir=.
 
-PKG_NAME="ia-tools"
+PKG_NAME="ia-bin-tools"
 
 which gnome-autogen.sh || {
     echo "You need to install gnome-common from the GNOME SVN repository"
