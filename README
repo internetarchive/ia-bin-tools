@@ -29,8 +29,8 @@ Development:
 
 Why the fork of sha1sum/md5sum?
 
-   I submitted a patch to gnu coreutils but there was no reponse.
-   https://lists.gnu.org/archive/html/bug-coreutils/2009-11/msg00206.html
+   There is an open bug with patch, but the sentiment seems to be that it
+   shouldn't be included. See http://debbugs.gnu.org/cgi/bugreport.cgi?bug=6056
    
 Why another whois client?
 
