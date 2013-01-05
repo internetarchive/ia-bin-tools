@@ -307,7 +307,7 @@ bin_search (const char *string,
   gboolean found_match = FALSE;
   gint64 line_pos = -1;
 
-  while (right - left >= len)
+  while (right - left > 0)
     {
       gint64 pos = (left + right + 1) / 2;
 
