@@ -1,5 +1,4 @@
-/* $Id$
- *
+/*
  * vim: set sw=2 et:
  *
  * Copyright (C) 2009 Internet Archive
@@ -501,7 +500,7 @@ check_gzip_footer (GzipChunksState *state)
       return FALSE;
     }
 
-  unsigned long purported_uncompressed_bytes = get_byte (state);
+  guint64 purported_uncompressed_bytes = get_byte (state);
   purported_uncompressed_bytes += ((unsigned) get_byte (state)) << 8;
   purported_uncompressed_bytes += ((unsigned) get_byte (state)) << 16;
   if (peek_byte (state) == EOF)
@@ -511,10 +510,10 @@ check_gzip_footer (GzipChunksState *state)
     }
   purported_uncompressed_bytes += ((unsigned) get_byte (state)) << 24;
 
-  if (purported_uncompressed_bytes != state->zs->total_out)
+  if (purported_uncompressed_bytes != state->zs->total_out % (1l<<32l))
     {
-      info ("purported uncompressed size %lu bytes does not match actual uncompressed size %lu bytes", 
-            purported_uncompressed_bytes, state->zs->total_out); 
+      info ("purported uncompressed size %lu bytes does not match actual uncompressed size %lu (modulo 2**32) bytes",
+            purported_uncompressed_bytes, state->zs->total_out);
       return FALSE;
     }
 

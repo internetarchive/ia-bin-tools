@@ -1,4 +1,4 @@
-AC_INIT([Internet Archive Binary Tools],[1.0],[mailto:nlevitt@archive.org],[ia-bin-tools])
+AC_INIT([Internet Archive Binary Tools],[1.0.1],[mailto:nlevitt@archive.org],[ia-bin-tools])
 
 AM_INIT_AUTOMAKE([1.9 foreign dist-bzip2])
 

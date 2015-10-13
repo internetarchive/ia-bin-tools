@@ -1,5 +1,3 @@
-# $Id$
-
 bin_PROGRAMS = \
        bin-search \
        gzip-chunks \
