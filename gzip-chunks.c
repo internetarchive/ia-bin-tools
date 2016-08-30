@@ -27,7 +27,7 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
-typedef struct 
+typedef struct
 {
   FILE          *fin;
   FILE          *fout;
@@ -42,7 +42,7 @@ typedef struct
   off_t          good_bytes;
   int            bad_chunks;
   off_t          bad_bytes;
-} 
+}
 GzipChunksState;
 
 /* gzip flag byte */
@@ -53,7 +53,7 @@ static int const ORIG_NAME   = 0x08; /* bit 3 set: original file name present */
 static int const COMMENT     = 0x10; /* bit 4 set: file comment present */
 static int const RESERVED    = 0xE0; /* bits 5..7: reserved */
 
-static size_t const INITIAL_BUF_SIZE = 4096; 
+static size_t const INITIAL_BUF_SIZE = 4096;
 static size_t const MAX_BUF_SIZE = 512 * 1024;
 static unsigned char const GZ_MAGIC[] = { 0x1f, 0x8b };
 
@@ -66,7 +66,7 @@ static struct
   char     *split_dir;
   off_t     start_offset;
   off_t     end_offset;
-} 
+}
 options = { FALSE, NULL, FALSE, FALSE, NULL, 0, -1 };
 
 static GOptionEntry entries[] =
@@ -125,9 +125,9 @@ xmalloc (size_t size)
   return ptr;
 }
 
-static size_t 
-xfread (FILE   *fin, 
-        void   *buf, 
+static size_t
+xfread (FILE   *fin,
+        void   *buf,
         size_t  nbytes)
 {
   errno = 0;
@@ -164,13 +164,13 @@ init_state (GzipChunksState   *state,
   state->bad_chunks = 0;
   state->bad_bytes = 0;
 
-  GOptionContext *context = g_option_context_new ("FILE");
+  GOptionContext *context = g_option_context_new ("[FILE]");
   GError *error = NULL;
 
   g_option_context_add_main_entries (context, entries, NULL);
   g_option_context_set_summary (context, "Identifies valid gzip chunks in the input and writes them verbatim to the output.");
 
-  g_option_context_set_description (context, 
+  g_option_context_set_description (context,
       "This tool dumps valid gzip chunks from the input. To put it another way, it\n"
       "elides invalid data.\n"
       "\n"
@@ -180,7 +180,7 @@ init_state (GzipChunksState   *state,
       "  gzip-chunks bad.warc.gz > repaired.warc.gz\n"
       "\n"
       "  # save invalid gzip chunks toward end of file for inspection\n"
-      "  gzip-chunks --invalid --split --start=90000000 bad.warc.gz\n");   
+      "  gzip-chunks --invalid --split --start=90000000 bad.warc.gz\n");
 
   if (!g_option_context_parse (context, argc, argv, &error))
     {
@@ -189,15 +189,15 @@ init_state (GzipChunksState   *state,
       exit (1);
     }
 
-  if (*argc != 2)
+  if (*argc > 2)
     {
-      fprintf (stderr, "%s: error: exactly one input filename required\n\n", g_get_prgname ());
+      fprintf (stderr, "%s: error: too many arguments\n\n", g_get_prgname ());
       fputs (g_option_context_get_help (context, TRUE, NULL), stderr);
       exit (1);
     }
 
   /* "--split --split-dir=foo" is the same as "--split-dir=foo */
-  if (*argc == 2)
+  if (*argc == 2 && strcmp ((*argv)[1], "-") != 0)
     {
       errno = 0;
       state->fin = fopen ((*argv)[1], "rb");
@@ -230,7 +230,7 @@ init_state (GzipChunksState   *state,
       if (state->split_dir == NULL)
         die ("mkdtemp: unable to create temp dir: %s", g_strerror (errno));
 
-      printf ("%s: dumping %s gzip chunks into %s (use --verbose for more info)\n", 
+      printf ("%s: dumping %s gzip chunks into %s (use --verbose for more info)\n",
           g_get_prgname (), options.invalid ? "invalid" : "valid", state->split_dir);
     }
   if (state->split_dir)
@@ -245,7 +245,7 @@ init_state (GzipChunksState   *state,
     {
       errno = 0;
       state->fout = fopen (options.output_file, "wb");
-      if (state->fout == NULL) 
+      if (state->fout == NULL)
         die ("%s: %s", options.output_file, g_strerror (errno));
     }
   else if (state->split_dir == NULL)
@@ -286,7 +286,7 @@ init_state (GzipChunksState   *state,
 /* 1. if there's no space in the buffer, resets it
  * 2. tries to fill buffer */
 static void
-refresh_in_buf (FILE     *fin, 
+refresh_in_buf (FILE     *fin,
                 z_stream *zs,
                 GString  *in_buf)
 {
@@ -308,7 +308,7 @@ refresh_in_buf (FILE     *fin,
 static int
 peek_byte (GzipChunksState *state)
 {
-  if (state->zs->avail_in == 0) 
+  if (state->zs->avail_in == 0)
     refresh_in_buf (state->fin, state->zs, state->in_buf);
 
   if (state->zs->avail_in == 0)
@@ -318,7 +318,7 @@ peek_byte (GzipChunksState *state)
 }
 
 /* returns EOF on eof */
-static int 
+static int
 get_byte (GzipChunksState *state)
 {
   int byte = peek_byte (state);
@@ -356,9 +356,9 @@ check_gzip_header (GzipChunksState *state)
       info ("purported gzip chunk has reserved bits set");
       return FALSE;
     }
-  
+
   /* discard time, xflags and os code */
-  for (i = 0; i < 6; i++) 
+  for (i = 0; i < 6; i++)
     byte = get_byte (state);
 
   if (byte == EOF)
@@ -367,8 +367,8 @@ check_gzip_header (GzipChunksState *state)
       return FALSE;
     }
 
-  if ((flags & EXTRA_FIELD) != 0)  
-    { 
+  if ((flags & EXTRA_FIELD) != 0)
+    {
       unsigned len = (unsigned) get_byte (state);
       len += ((unsigned) get_byte (state)) << 8;
 
@@ -382,10 +382,10 @@ check_gzip_header (GzipChunksState *state)
         }
     }
 
-  if ((flags & ORIG_NAME) != 0) 
+  if ((flags & ORIG_NAME) != 0)
     {
-      for (byte = get_byte (state); 
-          byte != 0 && byte != EOF; 
+      for (byte = get_byte (state);
+          byte != 0 && byte != EOF;
           byte = get_byte (state));
 
       if (byte == EOF)
@@ -395,10 +395,10 @@ check_gzip_header (GzipChunksState *state)
         }
     }
 
-  if ((flags & COMMENT) != 0) 
+  if ((flags & COMMENT) != 0)
     {
-      for (byte = get_byte (state); 
-          byte != 0 && byte != EOF; 
+      for (byte = get_byte (state);
+          byte != 0 && byte != EOF;
           byte = get_byte (state));
 
       if (byte == EOF)
@@ -408,7 +408,7 @@ check_gzip_header (GzipChunksState *state)
         }
     }
 
-  if ((flags & HEAD_CRC) != 0) 
+  if ((flags & HEAD_CRC) != 0)
     {
       byte = get_byte (state);
       byte = get_byte (state);
@@ -421,7 +421,7 @@ check_gzip_header (GzipChunksState *state)
     }
 
   return TRUE;
-} 
+}
 
 static void
 expand_buffers (GzipChunksState *state)
@@ -441,7 +441,7 @@ expand_buffers (GzipChunksState *state)
 static gboolean
 check_gzip_data (GzipChunksState *state)
 {
-  if (inflateReset (state->zs) != Z_OK) 
+  if (inflateReset (state->zs) != Z_OK)
     die ("inflateReset failed: probably indicates a bug in %s", g_get_prgname ());
 
   state->crc = crc32 (0l, NULL, 0);
@@ -477,7 +477,7 @@ check_gzip_data (GzipChunksState *state)
       else if (status == Z_NEED_DICT)
         die ("inflate returned Z_NEED_DICT: contingency unimplemented");
       else if (status != Z_OK && status != Z_STREAM_END)
-        die ("inflate returned unexpected status %d: probably indicates a bug in %s", 
+        die ("inflate returned unexpected status %d: probably indicates a bug in %s",
             status, g_get_prgname ());
 
       state->crc = crc32 (state->crc, next_out_before, state->zs->next_out - next_out_before);
@@ -533,7 +533,7 @@ read_chunk (GzipChunksState *state)
   /* g_string_set_size (state->chunk_buf, 0); */
   off_t chunk_offset = get_offset (state);
 
-  if (check_gzip_header (state) 
+  if (check_gzip_header (state)
       && check_gzip_data (state)
       && check_gzip_footer (state))
     {
@@ -586,15 +586,15 @@ maybe_write_chunk (GzipChunksState *state)
   off_t start_offset = -1;
   if (!options.invalid && state->good_chunk_offset >= 0)
     {
-      info ("writing good chunk offset=%lld length=%lld", 
-          (long long) state->good_chunk_offset, 
+      info ("writing good chunk offset=%lld length=%lld",
+          (long long) state->good_chunk_offset,
           (long long) (get_offset (state) - state->good_chunk_offset));
       start_offset = state->good_chunk_offset;
     }
   else if (options.invalid && state->bad_chunk_offset >= 0)
     {
-      info ("writing bad chunk offset=%lld length=%lld", 
-          (long long) state->bad_chunk_offset, 
+      info ("writing bad chunk offset=%lld length=%lld",
+          (long long) state->bad_chunk_offset,
           (long long) (get_offset (state) - state->bad_chunk_offset));
       start_offset = state->bad_chunk_offset;
     }
@@ -615,7 +615,7 @@ maybe_write_chunk (GzipChunksState *state)
 
       errno = 0;
       fout = fopen (filename->str, "wb");
-      if (fout == NULL) 
+      if (fout == NULL)
         die ("%s: %s", filename->str, g_strerror (errno));
 
       info ("writing %s", filename->str);
@@ -633,13 +633,13 @@ maybe_write_chunk (GzipChunksState *state)
 
   off_t bytes_written;
   for (bytes_written = 0; bytes_written < bytes_to_write; bytes_written++)
-    { 
+    {
       int byte = fgetc (state->fin);
       g_assert (byte != EOF);
       byte = fputc (byte, fout);
       if (byte == EOF)
         /* shouldn't ever happen so don't worry too much about the error message, right? */
-        die ("error writing"); 
+        die ("error writing");
     }
 
   if (state->split_dir)
@@ -664,7 +664,7 @@ main (int    argc,
     if (fseeko (state.fin, options.start_offset, SEEK_SET) != 0)
       die ("fseeko: %s", g_strerror (errno));
 
-  while (peek_byte (&state) != EOF && 
+  while (peek_byte (&state) != EOF &&
       (options.end_offset < 0 || get_offset (&state) < options.end_offset))
     if (read_chunk (&state))
       {
@@ -673,13 +673,13 @@ main (int    argc,
          * preceding bad chunk, depending if --invalid. */
         maybe_write_chunk (&state);
 
-	state.good_chunks++;
-	state.good_bytes += get_offset (&state) - state.good_chunk_offset;
-	if (state.bad_chunk_offset >= 0)
-	  {
-	    state.bad_chunks++;
-	    state.bad_bytes += get_offset (&state) - state.bad_chunk_offset;
-	  }
+        state.good_chunks++;
+        state.good_bytes += get_offset (&state) - state.good_chunk_offset;
+        if (state.bad_chunk_offset >= 0)
+          {
+            state.bad_chunks++;
+            state.bad_bytes += get_offset (&state) - state.bad_chunk_offset;
+          }
 
         state.bad_chunk_offset = -1;
         state.good_chunk_offset = -1;
