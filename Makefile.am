@@ -2,11 +2,11 @@ bin_PROGRAMS = \
        bin-search \
        gzip-chunks \
        whoiz \
-       md5sum \
-       sha1sum
+       ia-md5sum \
+       ia-sha1sum
 
 bin_search_SOURCES = \
-	bin-search.c	
+	bin-search.c
 
 bin_search_CPPFLAGS = \
 	-I$(top_srcdir)		\
@@ -66,9 +66,9 @@ whoiz_LDADD = \
 	$(GLIB_LIBS)	\
  	$(INTLLIBS)
 
-md5sum_SOURCES = md5sum.c md5.c md5.h
-md5sum_CPPFLAGS = -DHASH_ALGO_MD5=1 $(AM_CPPFLAGS)
-sha1sum_SOURCES = md5sum.c sha1.c sha1.h
-sha1sum_CPPFLAGS = -DHASH_ALGO_SHA1=1 $(AM_CPPFLAGS)
+ia_md5sum_SOURCES = md5sum.c md5.c md5.h
+ia_md5sum_CPPFLAGS = -DHASH_ALGO_MD5=1 $(AM_CPPFLAGS)
+ia_sha1sum_SOURCES = md5sum.c sha1.c sha1.h
+ia_sha1sum_CPPFLAGS = -DHASH_ALGO_SHA1=1 $(AM_CPPFLAGS)
 
 EXTRA_DIST = autogen.sh
