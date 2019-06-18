@@ -1,0 +1,8 @@
+546f999b972f6ab4b1e2882c281a8622  usr/bin/bin-search
+56d7e94e6dd37365fb7983e45955069c  usr/bin/gzip-chunks
+3b14cb82aa794ecbb6217e6671e3e7bb  usr/bin/ia-md5sum
+dd1d5c5c063a4a5a734fcee09a150d13  usr/bin/ia-sha1sum
+32fe6871b004ab298a664d958be4fd84  usr/bin/whoiz
+ff31560b6fe8f9cbf7fc43a6c483ae14  usr/share/doc/ia-bin-tools/README.Debian
+a269be3baea79a7a51700d76c0b7c1e0  usr/share/doc/ia-bin-tools/changelog.Debian.gz
+8e9c888f7edf98e5c548e509f09c44f6  usr/share/doc/ia-bin-tools/copyright

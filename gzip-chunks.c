@@ -339,7 +339,7 @@ check_gzip_header (GzipChunksState *state)
   for (i = 0; i < sizeof (GZ_MAGIC); i++)
     if (get_byte (state) != GZ_MAGIC[i])
       {
-        info ("purported gzip chunk doesn't start with gzip magic header");
+        info ("purported gzip chunk doesn't start with gzip magic header!");
         return FALSE;
       }
 

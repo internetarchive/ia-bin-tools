@@ -1,0 +1,22 @@
+Source: ia-bin-tools
+Section: unknown
+Priority: optional
+Maintainer: Noah Levitt <nlevitt@archive.org>
+Build-Depends: debhelper (>=9),autotools-dev
+Standards-Version: 3.9.6
+Homepage: https://github.com/internetarchive/ia-bin-tools/
+#Vcs-Git: git://anonscm.debian.org/collab-maint/ia-bin-tools.git
+#Vcs-Browser: https://anonscm.debian.org/cgit/collab-maint/ia-bin-tools.git
+
+Package: ia-bin-tools
+Architecture: any
+Depends: ${shlibs:Depends}, ${misc:Depends}
+Description: Internet Archive Command-line Utilities
+ Tools included:
+ * ia-sha1sum, ia-md5sum: forked from gnu coreutils, but with base32 support
+                          added
+ * gzip-chunks: identifies valid gzip chunks in the input and writes them
+                verbatim to the output
+ * bin-search: performs binary search of sorted text file(s)
+ * whoiz: performs whois queries (RFC 3912)
+

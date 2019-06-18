@@ -1,0 +1,17 @@
+Package: ia-bin-tools
+Version: 1.1-1
+Architecture: amd64
+Maintainer: Noah Levitt <nlevitt@archive.org>
+Installed-Size: 106
+Depends: libc6 (>= 2.14), libglib2.0-0 (>= 2.30.0), zlib1g (>= 1:1.1.4)
+Section: unknown
+Priority: optional
+Homepage: https://github.com/internetarchive/ia-bin-tools/
+Description: Internet Archive Command-line Utilities
+ Tools included:
+ * ia-sha1sum, ia-md5sum: forked from gnu coreutils, but with base32 support
+                          added
+ * gzip-chunks: identifies valid gzip chunks in the input and writes them
+                verbatim to the output
+ * bin-search: performs binary search of sorted text file(s)
+ * whoiz: performs whois queries (RFC 3912)
